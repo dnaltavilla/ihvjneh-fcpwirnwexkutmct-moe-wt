@@ -1,0 +1,25 @@
+{
+  "name": "Straordinari - Registro Orari",
+  "short_name": "Straordinari",
+  "description": "Registra e calcola gli straordinari mensili leggendo lo screenshot delle timbrature.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#f5820d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
