@@ -266,25 +266,31 @@ document.getElementById("btnExport").onclick = () => {
 // ============================================================
 // ==== LETTURA OCR DA SCREENSHOT (Tesseract.js, on-device) ====
 // ============================================================
-const ocrZone = document.getElementById("ocrZone");
-const ocrInput = document.getElementById("ocrInput");
+const btnCamera = document.getElementById("btnCamera");
+const btnGallery = document.getElementById("btnGallery");
+const ocrInputCamera = document.getElementById("ocrInputCamera");
+const ocrInputGallery = document.getElementById("ocrInputGallery");
 const ocrPreview = document.getElementById("ocrPreview");
 const ocrStatus = document.getElementById("ocrStatus");
 const ocrStatusText = document.getElementById("ocrStatusText");
 const ocrBanner = document.getElementById("ocrBanner");
 
 function resetOcrUI(){
-  ocrInput.value = "";
+  ocrInputCamera.value = "";
+  ocrInputGallery.value = "";
   ocrPreview.style.display = "none";
   ocrStatus.style.display = "none";
   ocrBanner.style.display = "none";
   ocrBanner.className = "ocr-result-banner";
 }
 
-ocrZone.onclick = () => ocrInput.click();
+btnCamera.onclick = () => ocrInputCamera.click();
+btnGallery.onclick = () => ocrInputGallery.click();
 
-ocrInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
+ocrInputCamera.addEventListener("change", (e) => processaImmagine(e.target.files[0]));
+ocrInputGallery.addEventListener("change", (e) => processaImmagine(e.target.files[0]));
+
+async function processaImmagine(file){
   if(!file) return;
 
   const imgUrl = URL.createObjectURL(file);
@@ -299,17 +305,18 @@ ocrInput.addEventListener("change", async (e) => {
     const processedCanvas = await preprocessImage(imgUrl);
     ocrStatusText.textContent = "Lettura testo in corso...";
 
-    const result = await Tesseract.recognize(processedCanvas, "eng", {
+    // Usiamo whitelist piu' ampia (includendo lettere) per poter riconoscere
+    // le etichette ORARIO / TIMBRATURE e ancorare correttamente gli orari giusti.
+    const result = await Tesseract.recognize(processedCanvas, "ita+eng", {
       logger: (m) => {
         if(m.status === "recognizing text"){
           ocrStatusText.textContent = `Lettura testo... ${Math.round(m.progress*100)}%`;
         }
-      },
-      tessedit_char_whitelist: "0123456789:EUeu "
+      }
     });
 
     const testoLetto = result.data.text;
-    const orari = estraiOrari(testoLetto);
+    const orari = estraiOrariTimbrature(testoLetto);
 
     ocrStatus.style.display = "none";
 
@@ -318,17 +325,17 @@ ocrInput.addEventListener("change", async (e) => {
       document.getElementById("fU1").value = orari[1];
       document.getElementById("fE2").value = orari[2];
       document.getElementById("fU2").value = orari[3];
-      ocrBanner.textContent = `✓ Rilevati ${orari.length} orari: ${orari.join(" · ")}. Controlla e correggi se serve.`;
+      ocrBanner.textContent = `✓ Rilevati orari da TIMBRATURE: ${orari.slice(0,4).join(" · ")}. Controlla e correggi se serve.`;
       ocrBanner.className = "ocr-result-banner ok";
     } else if(orari.length > 0){
       orari.forEach((val, i) => {
         const ids = ["fE1","fU1","fE2","fU2"];
         document.getElementById(ids[i]).value = val;
       });
-      ocrBanner.textContent = `⚠ Rilevati solo ${orari.length}/4 orari. Completa manualmente i campi mancanti.`;
+      ocrBanner.textContent = `⚠ Rilevati solo ${orari.length}/4 orari nella riga TIMBRATURE. Completa manualmente i campi mancanti.`;
       ocrBanner.className = "ocr-result-banner warn";
     } else {
-      ocrBanner.textContent = "⚠ Nessun orario riconosciuto automaticamente. Inserisci i valori manualmente qui sotto.";
+      ocrBanner.textContent = "⚠ Non ho trovato la riga TIMBRATURE nello screenshot. Inserisci i valori manualmente qui sotto.";
       ocrBanner.className = "ocr-result-banner warn";
     }
 
@@ -341,7 +348,7 @@ ocrInput.addEventListener("change", async (e) => {
     ocrBanner.textContent = "⚠ Errore nella lettura. Inserisci gli orari manualmente.";
     ocrBanner.className = "ocr-result-banner warn";
   }
-});
+}
 
 // Ritaglia/ingrandisce/binarizza l'immagine per migliorare l'accuratezza OCR
 function preprocessImage(imgUrl){
@@ -369,13 +376,26 @@ function preprocessImage(imgUrl){
   });
 }
 
-// Estrae sequenze HH:MM dal testo OCR, in ordine di apparizione
-function estraiOrari(testo){
-  const puliti = testo.replace(/[oO]/g, "0").replace(/[lI]/g, "1");
+// Estrae sequenze HH:MM SOLO dalla sezione "TIMBRATURE" del testo, scartando
+// la sezione "ORARIO" (turno teorico) che spesso precede nello screenshot.
+function estraiOrariTimbrature(testo){
+  const pulito = testo.replace(/[oO](?=\d|\s|$)/g, "0").replace(/[lI](?=\d|\s|$)/g, "1");
+
+  const idxTimbrature = pulito.search(/TIMBRATUR/i);
+  const idxGiustificativi = pulito.search(/GIUSTIFICATIV/i);
+
+  let zonaUtile;
+  if(idxTimbrature !== -1){
+    const fine = idxGiustificativi !== -1 && idxGiustificativi > idxTimbrature ? idxGiustificativi : pulito.length;
+    zonaUtile = pulito.slice(idxTimbrature, fine);
+  } else {
+    zonaUtile = pulito;
+  }
+
   const regex = /([01]?\d|2[0-3])[:.]([0-5]\d)/g;
   const trovati = [];
   let match;
-  while((match = regex.exec(puliti)) !== null){
+  while((match = regex.exec(zonaUtile)) !== null){
     const h = match[1].padStart(2,"0");
     const m = match[2];
     trovati.push(`${h}:${m}`);
@@ -383,14 +403,24 @@ function estraiOrari(testo){
   return trovati;
 }
 
-// Cerca pattern data tipo "7-Sep" "07/09" ecc. Fallback: nessuna modifica
+// Cerca pattern data tipo "7 settembre 2026" o "7-Sep". Fallback: nessuna modifica
 function estraiData(testo){
-  const mesiMap = {gen:1,feb:2,mar:3,apr:4,mag:5,may:5,giu:6,jun:6,lug:7,jul:7,ago:8,aug:8,set:9,sep:9,ott:10,oct:10,nov:11,dic:12,dec:12};
-  const m = testo.match(/(\d{1,2})[\s\-\/]([A-Za-z]{3})/);
+  const mesiMap = {
+    gennaio:1, gen:1, febbraio:2, feb:2, marzo:3, mar:3, aprile:4, apr:4,
+    maggio:5, mag:5, may:5, giugno:6, giu:6, jun:6, luglio:7, lug:7, jul:7,
+    agosto:8, ago:8, aug:8, settembre:9, set:9, sep:9, ottobre:10, ott:10, oct:10,
+    novembre:11, nov:11, dicembre:12, dic:12, dec:12
+  };
+  let m = testo.match(/(\d{1,2})\s+([A-Za-zàèìòù]{3,})\s+(\d{4})/i);
   if(m){
     const giorno = m[1].padStart(2,"0");
-    const meseAbbr = m[2].toLowerCase();
-    const mese = mesiMap[meseAbbr];
+    const mese = mesiMap[m[2].toLowerCase()];
+    if(mese) return `${m[3]}-${String(mese).padStart(2,"0")}-${giorno}`;
+  }
+  m = testo.match(/(\d{1,2})[\s\-\/]([A-Za-z]{3})/);
+  if(m){
+    const giorno = m[1].padStart(2,"0");
+    const mese = mesiMap[m[2].toLowerCase()];
     if(mese){
       const anno = new Date().getFullYear();
       return `${anno}-${String(mese).padStart(2,"0")}-${giorno}`;
