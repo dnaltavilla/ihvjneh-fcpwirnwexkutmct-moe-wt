@@ -1,6 +1,10 @@
 // ==== STRAORDINARI - LOGICA APP (con lettura OCR da screenshot) ====
+// NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
+// Tutti i parametri di retribuzione vengono inseriti dall'utente al primo avvio
+// e restano SOLO nel localStorage del suo telefono, mai nel codice pubblicato.
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
+const LS_ONBOARDED = "straordinari_onboarded_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
                   "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
@@ -8,10 +12,10 @@ const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
 let state = {
   giorni: [],
   settings: {
-    giorniTeorici: 22,
-    pagaGiornata: 102.28,
-    pagaStraordinario: 15.34,
-    percNetto: 82
+    giorniTeorici: 0,
+    pagaGiornata: 0,
+    pagaStraordinario: 0,
+    percNetto: 100
   },
   meseSelezionato: null
 };
@@ -44,8 +48,6 @@ function minutesToHM(mins){
 }
 function minutesToDecimal(mins){ return mins/60; }
 
-// La pausa pranzo minima contrattuale e' sempre di 30 minuti:
-// se la pausa reale (uscita->rientro) e' piu' breve, si applica comunque il minimo di 30'.
 const PAUSA_MINIMA = 30;
 
 function calcolaStraordinario(g){
@@ -110,6 +112,18 @@ function renderSummary(){
   const stimaNetto = stimaLordo * (s.percNetto/100);
 
   const grid = document.getElementById("summaryGrid");
+
+  if(s.pagaGiornata === 0 && s.pagaStraordinario === 0){
+    grid.innerHTML = `
+      <div class="summary-box" style="grid-column:1/3;">
+        <div class="lab">Imposta i tuoi valori di retribuzione in ⚙️ Impostazioni per vedere qui la stima stipendio. I dati restano solo su questo telefono.</div>
+      </div>
+      <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
+      <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
+    `;
+    return;
+  }
+
   grid.innerHTML = `
     <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
     <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
@@ -176,6 +190,33 @@ function renderAll(){
   renderGiorniList();
 }
 
+// ==== ONBOARDING PRIVATO (primo avvio, solo sul telefono dell'utente) ====
+const onboardOverlay = document.getElementById("onboardOverlay");
+
+function checkOnboarding(){
+  const done = localStorage.getItem(LS_ONBOARDED);
+  if(!done){
+    onboardOverlay.classList.add("open");
+  }
+}
+
+document.getElementById("btnOnboardSave").onclick = () => {
+  state.settings.giorniTeorici = parseFloat(document.getElementById("obGiorniTeorici").value) || 22;
+  state.settings.pagaGiornata = parseFloat(document.getElementById("obPagaGiornata").value) || 0;
+  state.settings.pagaStraordinario = parseFloat(document.getElementById("obPagaStraordinario").value) || 0;
+  state.settings.percNetto = parseFloat(document.getElementById("obPercNetto").value) || 100;
+  saveSettings();
+  localStorage.setItem(LS_ONBOARDED, "1");
+  onboardOverlay.classList.remove("open");
+  renderAll();
+};
+
+document.getElementById("btnOnboardSkip").onclick = () => {
+  localStorage.setItem(LS_ONBOARDED, "1");
+  onboardOverlay.classList.remove("open");
+  renderAll();
+};
+
 // ==== MODAL NUOVA GIORNATA ====
 const modalOverlay = document.getElementById("modalOverlay");
 const settingsOverlay = document.getElementById("settingsOverlay");
@@ -234,10 +275,10 @@ document.getElementById("btnSave").onclick = () => {
 
 // ==== SETTINGS ====
 document.getElementById("btnSettings").onclick = () => {
-  document.getElementById("sGiorniTeorici").value = state.settings.giorniTeorici;
-  document.getElementById("sPagaGiornata").value = state.settings.pagaGiornata;
-  document.getElementById("sPagaStraordinario").value = state.settings.pagaStraordinario;
-  document.getElementById("sPercNetto").value = state.settings.percNetto;
+  document.getElementById("sGiorniTeorici").value = state.settings.giorniTeorici || "";
+  document.getElementById("sPagaGiornata").value = state.settings.pagaGiornata || "";
+  document.getElementById("sPagaStraordinario").value = state.settings.pagaStraordinario || "";
+  document.getElementById("sPercNetto").value = state.settings.percNetto || "";
   settingsOverlay.classList.add("open");
 };
 settingsOverlay.addEventListener("click", (e) => { if(e.target === settingsOverlay) settingsOverlay.classList.remove("open"); });
@@ -305,8 +346,6 @@ async function processaImmagine(file){
     const processedCanvas = await preprocessImage(imgUrl);
     ocrStatusText.textContent = "Lettura testo in corso...";
 
-    // Usiamo whitelist piu' ampia (includendo lettere) per poter riconoscere
-    // le etichette ORARIO / TIMBRATURE e ancorare correttamente gli orari giusti.
     const result = await Tesseract.recognize(processedCanvas, "ita+eng", {
       logger: (m) => {
         if(m.status === "recognizing text"){
@@ -350,7 +389,6 @@ async function processaImmagine(file){
   }
 }
 
-// Ritaglia/ingrandisce/binarizza l'immagine per migliorare l'accuratezza OCR
 function preprocessImage(imgUrl){
   return new Promise((resolve) => {
     const img = new Image();
@@ -376,8 +414,6 @@ function preprocessImage(imgUrl){
   });
 }
 
-// Estrae sequenze HH:MM SOLO dalla sezione "TIMBRATURE" del testo, scartando
-// la sezione "ORARIO" (turno teorico) che spesso precede nello screenshot.
 function estraiOrariTimbrature(testo){
   const pulito = testo.replace(/[oO](?=\d|\s|$)/g, "0").replace(/[lI](?=\d|\s|$)/g, "1");
 
@@ -403,7 +439,6 @@ function estraiOrariTimbrature(testo){
   return trovati;
 }
 
-// Cerca pattern data tipo "7 settembre 2026" o "7-Sep". Fallback: nessuna modifica
 function estraiData(testo){
   const mesiMap = {
     gennaio:1, gen:1, febbraio:2, feb:2, marzo:3, mar:3, aprile:4, apr:4,
@@ -432,6 +467,7 @@ function estraiData(testo){
 // ==== INIT ====
 loadState();
 renderAll();
+checkOnboarding();
 
 // ==== SERVICE WORKER (PWA offline) ====
 if("serviceWorker" in navigator){
