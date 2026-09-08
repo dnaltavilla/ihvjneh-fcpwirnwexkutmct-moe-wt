@@ -19,7 +19,7 @@
   --grigio:#6b7280;
   --verde:#1fa855;
   --rosso:#e3453b;
-  --radius:14px;
+  --radius:16px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 body{
@@ -27,11 +27,12 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:var(--bg);
   color:var(--testo);
-  padding-bottom:90px;
+  padding-bottom:110px;
+  font-size:17px;
 }
 header{
   background:var(--card);
-  padding:16px 18px 12px;
+  padding:20px 20px 16px;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -40,25 +41,25 @@ header{
   top:0;
   z-index:10;
 }
-header h1{font-size:20px;margin:0;color:var(--arancio-scuro);font-weight:700;}
-.icon-btn{background:none;border:none;font-size:22px;color:var(--grigio);padding:6px;cursor:pointer;}
+header h1{font-size:26px;margin:0;color:var(--arancio-scuro);font-weight:800;}
+.icon-btn{background:none;border:none;font-size:28px;color:var(--grigio);padding:8px;cursor:pointer;}
 .tabs{
   display:flex;
-  gap:6px;
-  padding:10px 14px;
+  gap:8px;
+  padding:14px 16px;
   overflow-x:auto;
   background:var(--card);
   border-bottom:1px solid #eee;
   position:sticky;
-  top:57px;
+  top:70px;
   z-index:9;
 }
 .tab{
   flex:0 0 auto;
-  padding:8px 14px;
-  border-radius:20px;
-  font-size:13px;
-  font-weight:600;
+  padding:11px 18px;
+  border-radius:24px;
+  font-size:16px;
+  font-weight:700;
   color:var(--grigio);
   background:var(--bg);
   border:none;
@@ -66,147 +67,149 @@ header h1{font-size:20px;margin:0;color:var(--arancio-scuro);font-weight:700;}
   white-space:nowrap;
 }
 .tab.active{background:var(--arancio);color:#fff;}
-main{padding:14px;max-width:640px;margin:0 auto;}
+main{padding:18px;max-width:680px;margin:0 auto;}
 .card{
   background:var(--card);
   border-radius:var(--radius);
-  padding:16px;
-  margin-bottom:14px;
-  box-shadow:0 1px 3px rgba(0,0,0,.06);
+  padding:22px;
+  margin-bottom:18px;
+  box-shadow:0 2px 6px rgba(0,0,0,.07);
 }
-.card h2{margin:0 0 12px;font-size:15px;color:var(--arancio-scuro);text-transform:uppercase;letter-spacing:.5px;}
-.row{display:flex;gap:10px;margin-bottom:10px;}
+.card h2{margin:0 0 16px;font-size:18px;color:var(--arancio-scuro);text-transform:uppercase;letter-spacing:.6px;font-weight:800;}
+.row{display:flex;gap:12px;margin-bottom:14px;}
 .field{flex:1;}
-label{display:block;font-size:12px;color:var(--grigio);margin-bottom:4px;font-weight:600;}
+label{display:block;font-size:14px;color:var(--grigio);margin-bottom:6px;font-weight:700;}
 input,select{
   width:100%;
-  padding:11px 10px;
-  border:1px solid #ddd;
-  border-radius:10px;
-  font-size:15px;
+  padding:14px 12px;
+  border:1.5px solid #ddd;
+  border-radius:12px;
+  font-size:17px;
   background:#fafafa;
 }
 input:focus,select:focus{outline:2px solid var(--arancio);border-color:var(--arancio);}
 .btn{
   width:100%;
-  padding:13px;
+  padding:16px;
   border:none;
-  border-radius:12px;
-  font-size:16px;
-  font-weight:700;
+  border-radius:14px;
+  font-size:18px;
+  font-weight:800;
   cursor:pointer;
 }
 .btn-primary{background:var(--arancio);color:#fff;}
 .btn-secondary{background:#eee;color:var(--testo);}
-.btn-danger{background:none;color:var(--rosso);font-size:13px;padding:4px 8px;}
+.btn-danger{background:none;color:var(--rosso);font-size:15px;padding:6px 10px;font-weight:700;}
 .giorno-item{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  padding:12px 0;
+  padding:16px 0;
   border-bottom:1px solid #f0f0f0;
 }
 .giorno-item:last-child{border-bottom:none;}
 .giorno-left{display:flex;flex-direction:column;}
-.giorno-data{font-weight:700;font-size:14.5px;}
-.giorno-orari{font-size:12.5px;color:var(--grigio);margin-top:2px;}
-.giorno-right{display:flex;align-items:center;gap:10px;}
+.giorno-data{font-weight:800;font-size:17.5px;}
+.giorno-orari{font-size:14.5px;color:var(--grigio);margin-top:4px;}
+.giorno-right{display:flex;align-items:center;gap:12px;}
 .badge{
   background:#fff3e6;
   color:var(--arancio-scuro);
-  font-weight:700;
-  font-size:13px;
-  padding:5px 10px;
-  border-radius:8px;
+  font-weight:800;
+  font-size:16px;
+  padding:8px 14px;
+  border-radius:10px;
   white-space:nowrap;
 }
 .badge.zero{background:#f0f0f0;color:var(--grigio);}
-.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.summary-box{background:var(--bg);border-radius:10px;padding:10px 12px;}
-.summary-box .val{font-size:18px;font-weight:800;color:var(--arancio-scuro);}
-.summary-box .lab{font-size:11.5px;color:var(--grigio);}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.summary-box{background:var(--bg);border-radius:14px;padding:16px 14px;}
+.summary-box .val{font-size:24px;font-weight:900;color:var(--arancio-scuro);}
+.summary-box .lab{font-size:13.5px;color:var(--grigio);margin-top:4px;font-weight:600;}
 .fab{
   position:fixed;
-  bottom:24px;
-  right:20px;
-  width:58px;
-  height:58px;
+  bottom:28px;
+  right:24px;
+  width:68px;
+  height:68px;
   border-radius:50%;
   background:var(--arancio);
   color:#fff;
-  font-size:30px;
+  font-size:38px;
   border:none;
-  box-shadow:0 4px 14px rgba(245,130,13,.5);
+  box-shadow:0 6px 18px rgba(245,130,13,.55);
   cursor:pointer;
   z-index:20;
+  line-height:1;
 }
 .modal-overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.45);
+  position:fixed;inset:0;background:rgba(0,0,0,.5);
   display:none;align-items:flex-end;justify-content:center;z-index:50;
 }
 .modal-overlay.open{display:flex;}
 .modal{
-  background:#fff;width:100%;max-width:640px;
-  border-radius:20px 20px 0 0;
-  padding:20px;
-  max-height:88vh;
+  background:#fff;width:100%;max-width:680px;
+  border-radius:26px 26px 0 0;
+  padding:26px;
+  max-height:90vh;
   overflow-y:auto;
   animation:slideup .18s ease-out;
 }
 @keyframes slideup{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
-.modal h2{margin-top:0;font-size:17px;}
-.helper{font-size:12px;color:var(--grigio);margin:-6px 0 12px;}
-.empty-state{text-align:center;padding:40px 10px;color:var(--grigio);}
-.empty-state div{font-size:40px;margin-bottom:8px;}
-.chip-row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+.modal h2{margin-top:0;font-size:22px;font-weight:800;}
+.helper{font-size:14px;color:var(--grigio);margin:-6px 0 16px;line-height:1.5;}
+.empty-state{text-align:center;padding:50px 10px;color:var(--grigio);font-size:16px;}
+.empty-state div{font-size:48px;margin-bottom:12px;}
+.chip-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
 .chip{
-  padding:7px 12px;border-radius:20px;font-size:12.5px;font-weight:600;
-  background:var(--bg);color:var(--grigio);border:1px solid #e2e2e2;cursor:pointer;
+  padding:10px 16px;border-radius:24px;font-size:15px;font-weight:700;
+  background:var(--bg);color:var(--grigio);border:1.5px solid #e2e2e2;cursor:pointer;
 }
 .chip.active{background:var(--arancio);color:#fff;border-color:var(--arancio);}
-footer.settings-note{font-size:11px;color:var(--grigio);text-align:center;margin-top:10px;}
+footer.settings-note{font-size:13px;color:var(--grigio);text-align:center;margin-top:14px;line-height:1.5;}
 
 /* OCR specific */
-.ocr-choice{display:flex;gap:10px;margin-bottom:14px;}
+.ocr-choice{display:flex;gap:12px;margin-bottom:18px;}
 .ocr-choice button{
   flex:1;
   border:2px dashed #ddd;
-  border-radius:14px;
-  padding:16px 8px;
+  border-radius:16px;
+  padding:20px 10px;
   text-align:center;
   background:#fafafa;
   cursor:pointer;
   font-family:inherit;
 }
 .ocr-choice button:active{background:#f0f0f0;}
-.ocr-choice .icon{font-size:28px;margin-bottom:6px;display:block;}
-.ocr-choice .txt{font-size:12.5px;color:var(--grigio);font-weight:600;}
-.ocr-preview{max-width:100%;border-radius:10px;margin-bottom:12px;display:none;}
+.ocr-choice .icon{font-size:34px;margin-bottom:8px;display:block;}
+.ocr-choice .txt{font-size:14.5px;color:var(--grigio);font-weight:700;}
+.ocr-preview{max-width:100%;border-radius:14px;margin-bottom:16px;display:none;}
 .ocr-status{
   display:none;
   align-items:center;
-  gap:10px;
-  padding:12px;
+  gap:12px;
+  padding:16px;
   background:#fff3e6;
-  border-radius:10px;
-  margin-bottom:12px;
-  font-size:13px;
+  border-radius:14px;
+  margin-bottom:16px;
+  font-size:15px;
   color:var(--arancio-scuro);
-  font-weight:600;
+  font-weight:700;
 }
 .spinner{
-  width:18px;height:18px;border-radius:50%;
-  border:3px solid #f5cc99;border-top-color:var(--arancio);
+  width:22px;height:22px;border-radius:50%;
+  border:3.5px solid #f5cc99;border-top-color:var(--arancio);
   animation:spin 0.7s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg);}}
 .ocr-result-banner{
   display:none;
-  padding:10px 12px;
-  border-radius:10px;
-  font-size:12.5px;
-  margin-bottom:12px;
-  font-weight:600;
+  padding:12px 14px;
+  border-radius:14px;
+  font-size:14.5px;
+  margin-bottom:16px;
+  font-weight:700;
+  line-height:1.4;
 }
 .ocr-result-banner.ok{background:#e8f8ee;color:var(--verde);display:block;}
 .ocr-result-banner.warn{background:#fff3e6;color:var(--arancio-scuro);display:block;}
@@ -214,13 +217,23 @@ input[type=file]{display:none;}
 
 .privacy-note{
   background:#f0f7ff;
-  border-radius:10px;
-  padding:10px 12px;
-  font-size:12px;
+  border-radius:14px;
+  padding:14px 16px;
+  font-size:14px;
   color:#1a5fa8;
-  margin-bottom:14px;
-  line-height:1.4;
+  margin-bottom:18px;
+  line-height:1.5;
+  font-weight:600;
 }
+
+.import-status{
+  font-size:13.5px;
+  color:var(--grigio);
+  text-align:center;
+  margin-top:12px;
+  line-height:1.5;
+}
+.import-status.ok{color:var(--verde);font-weight:700;}
 </style>
 </head>
 <body>
@@ -300,7 +313,7 @@ input[type=file]{display:none;}
     </div>
     <div class="ocr-result-banner" id="ocrBanner"></div>
 
-    <p class="helper">Oppure inserisci/correggi gli orari manualmente qui sotto. Nota: se lo screenshot ha sia la riga "ORARIO" (turno previsto) sia "TIMBRATURE" (orari reali), l'app cerca di leggere solo la riga TIMBRATURE.</p>
+    <p class="helper">Oppure inserisci/correggi gli orari manualmente qui sotto.</p>
 
     <div class="chip-row" id="tipoChips">
       <button type="button" class="chip active" data-tipo="normale">Normale</button>
@@ -381,10 +394,19 @@ input[type=file]{display:none;}
       </div>
     </div>
     <div class="row">
-      <button class="btn btn-secondary" id="btnExport" style="margin-right:8px;">Esporta dati (JSON)</button>
-      <button class="btn btn-primary" id="btnSettingsSave">Salva</button>
+      <button class="btn btn-primary" id="btnSettingsSave">Salva impostazioni</button>
     </div>
-    <footer class="settings-note">Usa "Esporta dati" per un backup periodico su file, ad esempio prima di cambiare telefono.</footer>
+
+    <h2 style="margin-top:24px;">Importa / esporta dati</h2>
+    <p class="helper">L'importazione avviene <b>una sola volta</b>: dopo aver caricato il file JSON, i dati restano salvati in questo telefono (cache locale) e non serve più ricaricarlo, nemmeno chiudendo l'app.</p>
+    <input type="file" id="importInput" accept="application/json">
+    <div class="row">
+      <button class="btn btn-secondary" id="btnImport" style="margin-right:8px;">📥 Importa da JSON</button>
+      <button class="btn btn-secondary" id="btnExport">📤 Esporta backup</button>
+    </div>
+    <div class="import-status" id="importStatus"></div>
+
+    <footer class="settings-note">Usa "Esporta backup" periodicamente, ad esempio prima di cambiare telefono.</footer>
   </div>
 </div>
 
