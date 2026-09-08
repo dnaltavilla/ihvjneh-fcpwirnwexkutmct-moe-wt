@@ -1,4 +1,4 @@
-const CACHE_NAME = "straordinari-cache-v3";
+const CACHE_NAME = "straordinari-cache-v4";
 const FILES_TO_CACHE = [
   "./index.html",
   "./app.js",
@@ -22,10 +22,6 @@ self.addEventListener("activate", (evt) => {
   );
 });
 
-// Strategia "network-first" per index.html e app.js: prova sempre a scaricare
-// la versione piu' recente da rete, e usa la cache solo come fallback offline.
-// Questo evita che il telefono resti bloccato su una versione vecchia dei file
-// quando l'app viene aggiornata su GitHub.
 self.addEventListener("fetch", (evt) => {
   if(evt.request.url.includes("cdn.jsdelivr.net")){
     return;
