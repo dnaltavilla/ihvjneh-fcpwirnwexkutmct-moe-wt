@@ -1,4 +1,4 @@
-// ==== STRAORDINARI - LOGICA APP (OCR + import JSON con cache) ====
+// ==== STRAORDINARI - LOGICA APP (OCR + import JSON con cache + tastiera numerica) ====
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
@@ -45,7 +45,10 @@ function saveSettings(){ localStorage.setItem(LS_SETTINGS, JSON.stringify(state.
 
 function timeToMinutes(t){
   if(!t) return null;
-  const [h,m] = t.split(":").map(Number);
+  const parts = t.split(":");
+  if(parts.length !== 2) return null;
+  const h = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
+  if(isNaN(h) || isNaN(m)) return null;
   return h*60+m;
 }
 function minutesToHM(mins){
@@ -237,20 +240,54 @@ on("btnOnboardSkip", "click", () => {
   renderAll();
 });
 
+// ============================================================
+// ==== AUTO-FORMATTAZIONE CAMPI ORARIO (tastiera numerica) ====
+// Mentre l'utente digita solo cifre (es. "0827"), il campo si trasforma
+// automaticamente in "08:27" senza dover digitare i due punti.
+// ============================================================
+function formattaOrarioInput(el){
+  el.addEventListener("input", () => {
+    let digits = el.value.replace(/\D/g, "").slice(0, 4);
+    if(digits.length >= 3){
+      let h = digits.slice(0, 2);
+      let m = digits.slice(2);
+      el.value = h + ":" + m;
+    } else {
+      el.value = digits;
+    }
+  });
+  el.addEventListener("blur", () => {
+    if(el.value === "") return;
+    const digits = el.value.replace(/\D/g, "");
+    if(digits.length === 3){
+      el.value = "0" + digits.slice(0,1) + ":" + digits.slice(1);
+    }
+    let h = parseInt(el.value.split(":")[0], 10);
+    let m = parseInt((el.value.split(":")[1] || "0"), 10);
+    if(!isNaN(h) && !isNaN(m)){
+      h = Math.min(Math.max(h, 0), 23);
+      m = Math.min(Math.max(m, 0), 59);
+      if(el.value.includes(":")){
+        el.value = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+      }
+    }
+  });
+}
+
+function attivaTastieraNumericaOrari(){
+  document.querySelectorAll("input.time-input").forEach(formattaOrarioInput);
+}
+
 // ==== MODAL NUOVA GIORNATA ====
 let tipoCorrente = "normale";
 
 on("btnAdd", "click", () => {
   const fData = document.getElementById("fData");
   if(fData) fData.value = new Date().toISOString().slice(0,10);
-  ["fE1","fU1","fE2","fU2"].forEach(id => {
+  ["fE1","fU1","fE2","fU2","fOrarioIn","fOrarioOut"].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.value = "";
   });
-  const fOrarioIn = document.getElementById("fOrarioIn");
-  const fOrarioOut = document.getElementById("fOrarioOut");
-  if(fOrarioIn) fOrarioIn.value = "08:30";
-  if(fOrarioOut) fOrarioOut.value = "17:00";
   resetOcrUI();
   setTipo("normale");
   const modalOverlay = document.getElementById("modalOverlay");
@@ -354,26 +391,21 @@ on("btnExport", "click", () => {
 
 // ============================================================
 // ==== IMPORT JSON CON CACHE PERMANENTE ====
-// Una volta importato, i dati restano nel localStorage e non serve
-// piu' ricaricare il file: al prossimo avvio dell'app sono gia' li'.
+// L'input file e' attivato da un <label for="importInput"> HTML nativo
+// (piu' affidabile su Android rispetto a un .click() javascript).
 // ============================================================
 function aggiornaStatoImport(){
   const statusEl = document.getElementById("importStatus");
   if(!statusEl) return;
   const importato = localStorage.getItem(LS_IMPORTED);
   if(importato){
-    statusEl.textContent = `✓ Dati importati il ${new Date(parseInt(importato)).toLocaleDateString("it-IT")}. Sono in cache: non serve ricaricare il file.`;
+    statusEl.textContent = `✓ Dati importati il ${new Date(parseInt(importato)).toLocaleDateString("it-IT")}. Sono in cache: non serve ricaricare il file. Scorri i mesi nella barra in alto.`;
     statusEl.className = "import-status ok";
   } else {
-    statusEl.textContent = "Nessuna importazione ancora effettuata.";
+    statusEl.textContent = "Nessuna importazione ancora effettuata. Tocca il pulsante qui sopra e seleziona il file dati_importati.json.";
     statusEl.className = "import-status";
   }
 }
-
-on("btnImport", "click", () => {
-  const el = document.getElementById("importInput");
-  if(el) el.click();
-});
 
 on("importInput", "change", (e) => {
   const file = e.target.files[0];
@@ -392,17 +424,21 @@ on("importInput", "change", (e) => {
       localStorage.setItem(LS_IMPORTED, Date.now().toString());
       aggiornaStatoImport();
       renderAll();
-      alert(`Importazione completata: ${nuoviGiorni.length} giornate caricate in cache.`);
+      alert(`Importazione completata: ${nuoviGiorni.length} giornate caricate in cache. Chiudi le Impostazioni e scorri la barra dei mesi in alto per vederle.`);
     }catch(err){
       console.error(err);
       alert("Il file selezionato non è un JSON valido per questa app.");
     }
+  };
+  reader.onerror = () => {
+    alert("Non sono riuscito a leggere il file selezionato. Riprova.");
   };
   reader.readAsText(file);
 });
 
 // ============================================================
 // ==== LETTURA OCR DA SCREENSHOT (Tesseract.js, on-device) ====
+// Anche qui gli input sono attivati da <label> HTML nativi.
 // ============================================================
 const ocrPreview = document.getElementById("ocrPreview");
 const ocrStatus = document.getElementById("ocrStatus");
@@ -421,9 +457,6 @@ function resetOcrUI(){
     ocrBanner.className = "ocr-result-banner";
   }
 }
-
-on("btnCamera", "click", () => { const el = document.getElementById("ocrInputCamera"); if(el) el.click(); });
-on("btnGallery", "click", () => { const el = document.getElementById("ocrInputGallery"); if(el) el.click(); });
 
 on("ocrInputCamera", "change", (e) => processaImmagine(e.target.files[0]));
 on("ocrInputGallery", "change", (e) => processaImmagine(e.target.files[0]));
@@ -579,6 +612,7 @@ function estraiData(testo){
 loadState();
 renderAll();
 checkOnboarding();
+attivaTastieraNumericaOrari();
 
 // ==== SERVICE WORKER (PWA offline) ====
 if("serviceWorker" in navigator){
