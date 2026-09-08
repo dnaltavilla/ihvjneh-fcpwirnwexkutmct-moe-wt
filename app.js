@@ -1,10 +1,9 @@
-// ==== STRAORDINARI - LOGICA APP (con lettura OCR da screenshot) ====
+// ==== STRAORDINARI - LOGICA APP (OCR + import JSON con cache) ====
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
-// Tutti i parametri di retribuzione vengono inseriti dall'utente al primo avvio
-// e restano SOLO nel localStorage del suo telefono, mai nel codice pubblicato.
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
 const LS_ONBOARDED = "straordinari_onboarded_v1";
+const LS_IMPORTED = "straordinari_imported_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
                   "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
@@ -20,9 +19,6 @@ let state = {
   meseSelezionato: null
 };
 
-// Utility difensiva: aggancia un evento solo se l'elemento esiste davvero nella
-// pagina. Evita che un singolo elemento mancante (per un HTML non aggiornato)
-// blocchi l'esecuzione di TUTTO il resto dello script.
 function on(id, evento, handler){
   const el = document.getElementById(id);
   if(el){
@@ -323,6 +319,7 @@ on("btnSettings", "click", () => {
   setVal("sPercNetto", state.settings.percNetto);
   const settingsOverlay = document.getElementById("settingsOverlay");
   if(settingsOverlay) settingsOverlay.classList.add("open");
+  aggiornaStatoImport();
 });
 
 const settingsOverlayEl = document.getElementById("settingsOverlay");
@@ -353,6 +350,55 @@ on("btnExport", "click", () => {
   a.download = "straordinari_backup.json";
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// ============================================================
+// ==== IMPORT JSON CON CACHE PERMANENTE ====
+// Una volta importato, i dati restano nel localStorage e non serve
+// piu' ricaricare il file: al prossimo avvio dell'app sono gia' li'.
+// ============================================================
+function aggiornaStatoImport(){
+  const statusEl = document.getElementById("importStatus");
+  if(!statusEl) return;
+  const importato = localStorage.getItem(LS_IMPORTED);
+  if(importato){
+    statusEl.textContent = `✓ Dati importati il ${new Date(parseInt(importato)).toLocaleDateString("it-IT")}. Sono in cache: non serve ricaricare il file.`;
+    statusEl.className = "import-status ok";
+  } else {
+    statusEl.textContent = "Nessuna importazione ancora effettuata.";
+    statusEl.className = "import-status";
+  }
+}
+
+on("btnImport", "click", () => {
+  const el = document.getElementById("importInput");
+  if(el) el.click();
+});
+
+on("importInput", "change", (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    try{
+      const parsed = JSON.parse(evt.target.result);
+      const nuoviGiorni = Array.isArray(parsed.giorni) ? parsed.giorni : [];
+
+      const mappaEsistenti = new Map(state.giorni.map(g => [g.data, g]));
+      nuoviGiorni.forEach(g => mappaEsistenti.set(g.data, g));
+      state.giorni = Array.from(mappaEsistenti.values());
+      saveGiorni();
+
+      localStorage.setItem(LS_IMPORTED, Date.now().toString());
+      aggiornaStatoImport();
+      renderAll();
+      alert(`Importazione completata: ${nuoviGiorni.length} giornate caricate in cache.`);
+    }catch(err){
+      console.error(err);
+      alert("Il file selezionato non è un JSON valido per questa app.");
+    }
+  };
+  reader.readAsText(file);
 });
 
 // ============================================================
