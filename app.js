@@ -20,6 +20,20 @@ let state = {
   meseSelezionato: null
 };
 
+// Utility difensiva: aggancia un evento solo se l'elemento esiste davvero nella
+// pagina. Evita che un singolo elemento mancante (per un HTML non aggiornato)
+// blocchi l'esecuzione di TUTTO il resto dello script.
+function on(id, evento, handler){
+  const el = document.getElementById(id);
+  if(el){
+    el.addEventListener(evento, handler);
+    return el;
+  } else {
+    console.warn(`Elemento #${id} non trovato: verifica che index.html sia aggiornato insieme a app.js`);
+    return null;
+  }
+}
+
 function loadState(){
   try{
     const g = localStorage.getItem(LS_KEY);
@@ -82,11 +96,12 @@ function getMesiDisponibili(){
 }
 
 function renderTabs(){
+  const container = document.getElementById("monthTabs");
+  if(!container) return;
   const mesi = getMesiDisponibili();
   if(!state.meseSelezionato || !mesi.includes(state.meseSelezionato)){
     state.meseSelezionato = mesi[mesi.length-1];
   }
-  const container = document.getElementById("monthTabs");
   container.innerHTML = "";
   mesi.forEach(m => {
     const btn = document.createElement("button");
@@ -98,6 +113,9 @@ function renderTabs(){
 }
 
 function renderSummary(){
+  const grid = document.getElementById("summaryGrid");
+  if(!grid) return;
+
   const mese = state.meseSelezionato;
   const giorniMese = state.giorni.filter(g => meseKeyOf(g.data) === mese)
                                   .sort((a,b)=> a.data.localeCompare(b.data));
@@ -110,8 +128,6 @@ function renderSummary(){
   const pagaStraordinarioTot = totaleOreStraordinario * s.pagaStraordinario;
   const stimaLordo = stipendioBase + pagaStraordinarioTot;
   const stimaNetto = stimaLordo * (s.percNetto/100);
-
-  const grid = document.getElementById("summaryGrid");
 
   if(s.pagaGiornata === 0 && s.pagaStraordinario === 0){
     grid.innerHTML = `
@@ -138,10 +154,12 @@ function tipoLabel(t){
 }
 
 function renderGiorniList(){
+  const list = document.getElementById("giorniList");
+  if(!list) return;
+
   const mese = state.meseSelezionato;
   const giorniMese = state.giorni.filter(g => meseKeyOf(g.data) === mese)
                                   .sort((a,b)=> a.data.localeCompare(b.data));
-  const list = document.getElementById("giorniList");
 
   if(giorniMese.length === 0){
     list.innerHTML = `<div class="empty-state"><div>📅</div>Nessuna giornata registrata<br>per questo mese</div>`;
@@ -191,77 +209,99 @@ function renderAll(){
 }
 
 // ==== ONBOARDING PRIVATO (primo avvio, solo sul telefono dell'utente) ====
-const onboardOverlay = document.getElementById("onboardOverlay");
-
 function checkOnboarding(){
+  const onboardOverlay = document.getElementById("onboardOverlay");
+  if(!onboardOverlay) return;
   const done = localStorage.getItem(LS_ONBOARDED);
   if(!done){
     onboardOverlay.classList.add("open");
   }
 }
 
-document.getElementById("btnOnboardSave").onclick = () => {
-  state.settings.giorniTeorici = parseFloat(document.getElementById("obGiorniTeorici").value) || 22;
-  state.settings.pagaGiornata = parseFloat(document.getElementById("obPagaGiornata").value) || 0;
-  state.settings.pagaStraordinario = parseFloat(document.getElementById("obPagaStraordinario").value) || 0;
-  state.settings.percNetto = parseFloat(document.getElementById("obPercNetto").value) || 100;
+on("btnOnboardSave", "click", () => {
+  const gT = document.getElementById("obGiorniTeorici");
+  const pG = document.getElementById("obPagaGiornata");
+  const pS = document.getElementById("obPagaStraordinario");
+  const pN = document.getElementById("obPercNetto");
+  state.settings.giorniTeorici = parseFloat(gT ? gT.value : "") || 22;
+  state.settings.pagaGiornata = parseFloat(pG ? pG.value : "") || 0;
+  state.settings.pagaStraordinario = parseFloat(pS ? pS.value : "") || 0;
+  state.settings.percNetto = parseFloat(pN ? pN.value : "") || 100;
   saveSettings();
   localStorage.setItem(LS_ONBOARDED, "1");
-  onboardOverlay.classList.remove("open");
+  const ov = document.getElementById("onboardOverlay");
+  if(ov) ov.classList.remove("open");
   renderAll();
-};
+});
 
-document.getElementById("btnOnboardSkip").onclick = () => {
+on("btnOnboardSkip", "click", () => {
   localStorage.setItem(LS_ONBOARDED, "1");
-  onboardOverlay.classList.remove("open");
+  const ov = document.getElementById("onboardOverlay");
+  if(ov) ov.classList.remove("open");
   renderAll();
-};
+});
 
 // ==== MODAL NUOVA GIORNATA ====
-const modalOverlay = document.getElementById("modalOverlay");
-const settingsOverlay = document.getElementById("settingsOverlay");
 let tipoCorrente = "normale";
 
-document.getElementById("btnAdd").onclick = () => {
-  document.getElementById("fData").value = new Date().toISOString().slice(0,10);
-  document.getElementById("fE1").value = "";
-  document.getElementById("fU1").value = "";
-  document.getElementById("fE2").value = "";
-  document.getElementById("fU2").value = "";
-  document.getElementById("fOrarioIn").value = "08:30";
-  document.getElementById("fOrarioOut").value = "17:00";
+on("btnAdd", "click", () => {
+  const fData = document.getElementById("fData");
+  if(fData) fData.value = new Date().toISOString().slice(0,10);
+  ["fE1","fU1","fE2","fU2"].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.value = "";
+  });
+  const fOrarioIn = document.getElementById("fOrarioIn");
+  const fOrarioOut = document.getElementById("fOrarioOut");
+  if(fOrarioIn) fOrarioIn.value = "08:30";
+  if(fOrarioOut) fOrarioOut.value = "17:00";
   resetOcrUI();
   setTipo("normale");
-  modalOverlay.classList.add("open");
-};
-document.getElementById("btnCancel").onclick = () => modalOverlay.classList.remove("open");
-modalOverlay.addEventListener("click", (e) => { if(e.target === modalOverlay) modalOverlay.classList.remove("open"); });
+  const modalOverlay = document.getElementById("modalOverlay");
+  if(modalOverlay) modalOverlay.classList.add("open");
+});
+
+on("btnCancel", "click", () => {
+  const modalOverlay = document.getElementById("modalOverlay");
+  if(modalOverlay) modalOverlay.classList.remove("open");
+});
+
+const modalOverlayEl = document.getElementById("modalOverlay");
+if(modalOverlayEl){
+  modalOverlayEl.addEventListener("click", (e) => {
+    if(e.target === modalOverlayEl) modalOverlayEl.classList.remove("open");
+  });
+}
 
 function setTipo(t){
   tipoCorrente = t;
   document.querySelectorAll("#tipoChips .chip").forEach(c => {
     c.classList.toggle("active", c.dataset.tipo === t);
   });
-  document.getElementById("orariFields").style.display = (t === "normale") ? "block" : "none";
+  const orariFields = document.getElementById("orariFields");
+  if(orariFields) orariFields.style.display = (t === "normale") ? "block" : "none";
 }
 document.querySelectorAll("#tipoChips .chip").forEach(c => {
   c.onclick = () => setTipo(c.dataset.tipo);
 });
 
-document.getElementById("btnSave").onclick = () => {
-  const data = document.getElementById("fData").value;
+on("btnSave", "click", () => {
+  const fData = document.getElementById("fData");
+  const data = fData ? fData.value : "";
   if(!data){ alert("Inserisci una data"); return; }
+
+  const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
 
   const nuovaGiornata = {
     id: Date.now().toString(),
     data: data,
     tipo: tipoCorrente,
-    e1: document.getElementById("fE1").value,
-    u1: document.getElementById("fU1").value,
-    e2: document.getElementById("fE2").value,
-    u2: document.getElementById("fU2").value,
-    orarioIn: document.getElementById("fOrarioIn").value,
-    orarioOut: document.getElementById("fOrarioOut").value
+    e1: getVal("fE1"),
+    u1: getVal("fU1"),
+    e2: getVal("fE2"),
+    u2: getVal("fU2"),
+    orarioIn: getVal("fOrarioIn") || "08:30",
+    orarioOut: getVal("fOrarioOut") || "17:00"
   };
 
   state.giorni = state.giorni.filter(g => g.data !== data);
@@ -269,31 +309,42 @@ document.getElementById("btnSave").onclick = () => {
   saveGiorni();
 
   state.meseSelezionato = meseKeyOf(data);
-  modalOverlay.classList.remove("open");
+  const modalOverlay = document.getElementById("modalOverlay");
+  if(modalOverlay) modalOverlay.classList.remove("open");
   renderAll();
-};
+});
 
 // ==== SETTINGS ====
-document.getElementById("btnSettings").onclick = () => {
-  document.getElementById("sGiorniTeorici").value = state.settings.giorniTeorici || "";
-  document.getElementById("sPagaGiornata").value = state.settings.pagaGiornata || "";
-  document.getElementById("sPagaStraordinario").value = state.settings.pagaStraordinario || "";
-  document.getElementById("sPercNetto").value = state.settings.percNetto || "";
-  settingsOverlay.classList.add("open");
-};
-settingsOverlay.addEventListener("click", (e) => { if(e.target === settingsOverlay) settingsOverlay.classList.remove("open"); });
+on("btnSettings", "click", () => {
+  const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val || ""; };
+  setVal("sGiorniTeorici", state.settings.giorniTeorici);
+  setVal("sPagaGiornata", state.settings.pagaGiornata);
+  setVal("sPagaStraordinario", state.settings.pagaStraordinario);
+  setVal("sPercNetto", state.settings.percNetto);
+  const settingsOverlay = document.getElementById("settingsOverlay");
+  if(settingsOverlay) settingsOverlay.classList.add("open");
+});
 
-document.getElementById("btnSettingsSave").onclick = () => {
-  state.settings.giorniTeorici = parseFloat(document.getElementById("sGiorniTeorici").value) || 22;
-  state.settings.pagaGiornata = parseFloat(document.getElementById("sPagaGiornata").value) || 0;
-  state.settings.pagaStraordinario = parseFloat(document.getElementById("sPagaStraordinario").value) || 0;
-  state.settings.percNetto = parseFloat(document.getElementById("sPercNetto").value) || 100;
+const settingsOverlayEl = document.getElementById("settingsOverlay");
+if(settingsOverlayEl){
+  settingsOverlayEl.addEventListener("click", (e) => {
+    if(e.target === settingsOverlayEl) settingsOverlayEl.classList.remove("open");
+  });
+}
+
+on("btnSettingsSave", "click", () => {
+  const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  state.settings.giorniTeorici = parseFloat(getVal("sGiorniTeorici")) || 22;
+  state.settings.pagaGiornata = parseFloat(getVal("sPagaGiornata")) || 0;
+  state.settings.pagaStraordinario = parseFloat(getVal("sPagaStraordinario")) || 0;
+  state.settings.percNetto = parseFloat(getVal("sPercNetto")) || 100;
   saveSettings();
-  settingsOverlay.classList.remove("open");
+  const settingsOverlay = document.getElementById("settingsOverlay");
+  if(settingsOverlay) settingsOverlay.classList.remove("open");
   renderAll();
-};
+});
 
-document.getElementById("btnExport").onclick = () => {
+on("btnExport", "click", () => {
   const dataStr = JSON.stringify({giorni: state.giorni, settings: state.settings}, null, 2);
   const blob = new Blob([dataStr], {type:"application/json"});
   const url = URL.createObjectURL(blob);
@@ -302,53 +353,59 @@ document.getElementById("btnExport").onclick = () => {
   a.download = "straordinari_backup.json";
   a.click();
   URL.revokeObjectURL(url);
-};
+});
 
 // ============================================================
 // ==== LETTURA OCR DA SCREENSHOT (Tesseract.js, on-device) ====
 // ============================================================
-const btnCamera = document.getElementById("btnCamera");
-const btnGallery = document.getElementById("btnGallery");
-const ocrInputCamera = document.getElementById("ocrInputCamera");
-const ocrInputGallery = document.getElementById("ocrInputGallery");
 const ocrPreview = document.getElementById("ocrPreview");
 const ocrStatus = document.getElementById("ocrStatus");
 const ocrStatusText = document.getElementById("ocrStatusText");
 const ocrBanner = document.getElementById("ocrBanner");
 
 function resetOcrUI(){
-  ocrInputCamera.value = "";
-  ocrInputGallery.value = "";
-  ocrPreview.style.display = "none";
-  ocrStatus.style.display = "none";
-  ocrBanner.style.display = "none";
-  ocrBanner.className = "ocr-result-banner";
+  const c1 = document.getElementById("ocrInputCamera");
+  const c2 = document.getElementById("ocrInputGallery");
+  if(c1) c1.value = "";
+  if(c2) c2.value = "";
+  if(ocrPreview) ocrPreview.style.display = "none";
+  if(ocrStatus) ocrStatus.style.display = "none";
+  if(ocrBanner){
+    ocrBanner.style.display = "none";
+    ocrBanner.className = "ocr-result-banner";
+  }
 }
 
-btnCamera.onclick = () => ocrInputCamera.click();
-btnGallery.onclick = () => ocrInputGallery.click();
+on("btnCamera", "click", () => { const el = document.getElementById("ocrInputCamera"); if(el) el.click(); });
+on("btnGallery", "click", () => { const el = document.getElementById("ocrInputGallery"); if(el) el.click(); });
 
-ocrInputCamera.addEventListener("change", (e) => processaImmagine(e.target.files[0]));
-ocrInputGallery.addEventListener("change", (e) => processaImmagine(e.target.files[0]));
+on("ocrInputCamera", "change", (e) => processaImmagine(e.target.files[0]));
+on("ocrInputGallery", "change", (e) => processaImmagine(e.target.files[0]));
 
 async function processaImmagine(file){
   if(!file) return;
+  if(typeof Tesseract === "undefined"){
+    if(ocrBanner){
+      ocrBanner.textContent = "⚠ Motore OCR non disponibile (verifica connessione internet al primo utilizzo). Inserisci gli orari manualmente.";
+      ocrBanner.className = "ocr-result-banner warn";
+    }
+    return;
+  }
 
   const imgUrl = URL.createObjectURL(file);
-  ocrPreview.src = imgUrl;
-  ocrPreview.style.display = "block";
-  ocrBanner.style.display = "none";
+  if(ocrPreview){ ocrPreview.src = imgUrl; ocrPreview.style.display = "block"; }
+  if(ocrBanner) ocrBanner.style.display = "none";
 
-  ocrStatus.style.display = "flex";
-  ocrStatusText.textContent = "Preparazione immagine...";
+  if(ocrStatus) ocrStatus.style.display = "flex";
+  if(ocrStatusText) ocrStatusText.textContent = "Preparazione immagine...";
 
   try{
     const processedCanvas = await preprocessImage(imgUrl);
-    ocrStatusText.textContent = "Lettura testo in corso...";
+    if(ocrStatusText) ocrStatusText.textContent = "Lettura testo in corso...";
 
     const result = await Tesseract.recognize(processedCanvas, "ita+eng", {
       logger: (m) => {
-        if(m.status === "recognizing text"){
+        if(m.status === "recognizing text" && ocrStatusText){
           ocrStatusText.textContent = `Lettura testo... ${Math.round(m.progress*100)}%`;
         }
       }
@@ -357,35 +414,43 @@ async function processaImmagine(file){
     const testoLetto = result.data.text;
     const orari = estraiOrariTimbrature(testoLetto);
 
-    ocrStatus.style.display = "none";
+    if(ocrStatus) ocrStatus.style.display = "none";
+
+    const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
 
     if(orari.length >= 4){
-      document.getElementById("fE1").value = orari[0];
-      document.getElementById("fU1").value = orari[1];
-      document.getElementById("fE2").value = orari[2];
-      document.getElementById("fU2").value = orari[3];
-      ocrBanner.textContent = `✓ Rilevati orari da TIMBRATURE: ${orari.slice(0,4).join(" · ")}. Controlla e correggi se serve.`;
-      ocrBanner.className = "ocr-result-banner ok";
+      setVal("fE1", orari[0]);
+      setVal("fU1", orari[1]);
+      setVal("fE2", orari[2]);
+      setVal("fU2", orari[3]);
+      if(ocrBanner){
+        ocrBanner.textContent = `✓ Rilevati orari da TIMBRATURE: ${orari.slice(0,4).join(" · ")}. Controlla e correggi se serve.`;
+        ocrBanner.className = "ocr-result-banner ok";
+      }
     } else if(orari.length > 0){
-      orari.forEach((val, i) => {
-        const ids = ["fE1","fU1","fE2","fU2"];
-        document.getElementById(ids[i]).value = val;
-      });
-      ocrBanner.textContent = `⚠ Rilevati solo ${orari.length}/4 orari nella riga TIMBRATURE. Completa manualmente i campi mancanti.`;
-      ocrBanner.className = "ocr-result-banner warn";
+      const ids = ["fE1","fU1","fE2","fU2"];
+      orari.forEach((val, i) => setVal(ids[i], val));
+      if(ocrBanner){
+        ocrBanner.textContent = `⚠ Rilevati solo ${orari.length}/4 orari nella riga TIMBRATURE. Completa manualmente i campi mancanti.`;
+        ocrBanner.className = "ocr-result-banner warn";
+      }
     } else {
-      ocrBanner.textContent = "⚠ Non ho trovato la riga TIMBRATURE nello screenshot. Inserisci i valori manualmente qui sotto.";
-      ocrBanner.className = "ocr-result-banner warn";
+      if(ocrBanner){
+        ocrBanner.textContent = "⚠ Non ho trovato la riga TIMBRATURE nello screenshot. Inserisci i valori manualmente qui sotto.";
+        ocrBanner.className = "ocr-result-banner warn";
+      }
     }
 
     const dataRilevata = estraiData(testoLetto);
-    if(dataRilevata) document.getElementById("fData").value = dataRilevata;
+    if(dataRilevata) setVal("fData", dataRilevata);
 
   }catch(err){
     console.error(err);
-    ocrStatus.style.display = "none";
-    ocrBanner.textContent = "⚠ Errore nella lettura. Inserisci gli orari manualmente.";
-    ocrBanner.className = "ocr-result-banner warn";
+    if(ocrStatus) ocrStatus.style.display = "none";
+    if(ocrBanner){
+      ocrBanner.textContent = "⚠ Errore nella lettura. Inserisci gli orari manualmente.";
+      ocrBanner.className = "ocr-result-banner warn";
+    }
   }
 }
 
