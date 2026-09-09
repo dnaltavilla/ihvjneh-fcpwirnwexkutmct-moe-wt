@@ -1,4 +1,4 @@
-// ==== STRAORDINARI - LOGICA APP (OCR + import JSON con cache + tastiera numerica) ====
+// ==== STRAORDINARI - LOGICA APP (OCR + import JSON + modifica + stima netto realistica) ====
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
@@ -11,13 +11,16 @@ const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
 let state = {
   giorni: [],
   settings: {
-    giorniTeorici: 0,
-    pagaGiornata: 0,
+    tipoContratto: "indeterminato",
+    ralAnnua: 0,
+    mensilita: 13,
     pagaStraordinario: 0,
-    percNetto: 100
+    giorniTeorici: 22
   },
   meseSelezionato: null
 };
+
+let giornoInModifica = null; // id della giornata attualmente in editing, null = nuova
 
 function on(id, evento, handler){
   const el = document.getElementById(id);
@@ -81,6 +84,86 @@ function calcolaStraordinario(g){
   return diff > 0 ? minutesToDecimal(diff) : 0;
 }
 
+// ============================================================
+// ==== MOTORE STIMA NETTO REALISTICO (IRPEF 2026 + INPS + apprendistato) ====
+// Stessa logica del progetto "ral-netto-calculator": scaglioni IRPEF 2026,
+// contributi INPS lavoratore 9,19%, differenza apprendistato/indeterminato,
+// applicata qui allo stipendio base + straordinari fatti nel mese.
+// ============================================================
+const ALIQUOTA_INPS_LAVORATORE = 0.0919; // aliquota standard dipendenti
+
+// Scaglioni IRPEF 2026 (Legge di Bilancio 2026)
+const SCAGLIONI_IRPEF_2026 = [
+  { fino: 28000, aliquota: 0.23 },
+  { fino: 50000, aliquota: 0.33 },
+  { fino: Infinity, aliquota: 0.43 }
+];
+
+function calcolaIrpefAnnua(imponibileAnnuo){
+  let imposta = 0;
+  let sogliaPrec = 0;
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
+    if(imponibileAnnuo > sogliaPrec){
+      const base = Math.min(imponibileAnnuo, scaglione.fino) - sogliaPrec;
+      imposta += base * scaglione.aliquota;
+      sogliaPrec = scaglione.fino;
+    } else break;
+  }
+  return imposta;
+}
+
+// Detrazione lavoro dipendente 2026 (semplificata, decrescente con il reddito)
+function calcolaDetrazioneLavoroDipendente(imponibileAnnuo){
+  if(imponibileAnnuo <= 15000){
+    return Math.min(1955, imponibileAnnuo * 0.667 + 690);
+  } else if(imponibileAnnuo <= 28000){
+    return 1910 + 1190 * (28000 - imponibileAnnuo) / 13000;
+  } else if(imponibileAnnuo <= 50000){
+    return 1910 * (50000 - imponibileAnnuo) / 22000;
+  }
+  return 0;
+}
+
+// Bonus/cuneo fiscale 2026: esonero contributivo o detrazione fissa a seconda della fascia
+function calcolaCuneoFiscale(imponibileAnnuo){
+  if(imponibileAnnuo <= 8500) return imponibileAnnuo * 0.071;
+  if(imponibileAnnuo <= 15000) return imponibileAnnuo * 0.053;
+  if(imponibileAnnuo <= 20000) return imponibileAnnuo * 0.048;
+  if(imponibileAnnuo <= 32000) return 1000;
+  if(imponibileAnnuo <= 40000) return 1000 * (40000 - imponibileAnnuo) / 8000;
+  return 0;
+}
+
+// Calcola netto annuo/mensile da RAL lorda annua, tenendo conto di:
+// - contratto apprendistato: aliquota INPS lavoratore ridotta (5,84% vs 9,19% standard)
+// - scaglioni IRPEF 2026, detrazione lavoro dipendente, cuneo fiscale
+function calcolaNettoDaLordo(lordoAnnuo, tipoContratto){
+  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
+  const contributiInps = lordoAnnuo * aliquotaInps;
+  const imponibileFiscale = lordoAnnuo - contributiInps;
+
+  const irpefLorda = calcolaIrpefAnnua(imponibileFiscale);
+  const detrazione = calcolaDetrazioneLavoroDipendente(imponibileFiscale);
+  const cuneo = calcolaCuneoFiscale(imponibileFiscale);
+
+  const irpefNetta = Math.max(0, irpefLorda - detrazione);
+  const nettoAnnuo = lordoAnnuo - contributiInps - irpefNetta + cuneo;
+
+  return { nettoAnnuo, contributiInps, irpefNetta, cuneo, imponibileFiscale };
+}
+
+// Stima l'incidenza netta (%) di un euro aggiuntivo di straordinario,
+// usando l'aliquota marginale del proprio scaglione IRPEF + INPS.
+function percentualeNettaMarginale(ralAnnua, tipoContratto){
+  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
+  const imponibileStimato = ralAnnua * (1 - aliquotaInps);
+  let aliquotaMarginale = 0.23;
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
+    if(imponibileStimato <= scaglione.fino){ aliquotaMarginale = scaglione.aliquota; break; }
+  }
+  return (1 - aliquotaInps) * (1 - aliquotaMarginale);
+}
+
 function meseKeyOf(dataStr){ return dataStr.slice(0,7); }
 function formatMeseLabel(meseKey){
   const [y,m] = meseKey.split("-").map(Number);
@@ -123,15 +206,11 @@ function renderSummary(){
   const giorniLavorati = giorniMese.filter(g => g.tipo === "normale").length;
 
   const s = state.settings;
-  const stipendioBase = s.giorniTeorici * s.pagaGiornata;
-  const pagaStraordinarioTot = totaleOreStraordinario * s.pagaStraordinario;
-  const stimaLordo = stipendioBase + pagaStraordinarioTot;
-  const stimaNetto = stimaLordo * (s.percNetto/100);
 
-  if(s.pagaGiornata === 0 && s.pagaStraordinario === 0){
+  if(!s.ralAnnua || s.ralAnnua === 0){
     grid.innerHTML = `
       <div class="summary-box" style="grid-column:1/3;">
-        <div class="lab">Imposta i tuoi valori di retribuzione in ⚙️ Impostazioni per vedere qui la stima stipendio. I dati restano solo su questo telefono.</div>
+        <div class="lab">Imposta RAL e tipo contratto in ⚙️ Impostazioni per vedere qui la stima netto realistica (scaglioni IRPEF 2026). I dati restano solo su questo telefono.</div>
       </div>
       <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
       <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
@@ -139,12 +218,29 @@ function renderSummary(){
     return;
   }
 
+  const mensilita = s.mensilita || 13;
+  const stipendioBaseMensile = s.ralAnnua / mensilita;
+  const pagaStraordinarioTot = totaleOreStraordinario * (s.pagaStraordinario || 0);
+
+  const pctNettaMarginale = percentualeNettaMarginale(s.ralAnnua, s.tipoContratto);
+  const nettoStraordinario = pagaStraordinarioTot * pctNettaMarginale;
+
+  const { nettoAnnuo } = calcolaNettoDaLordo(s.ralAnnua, s.tipoContratto);
+  const nettoBaseMensile = nettoAnnuo / mensilita;
+
+  const nettoMeseStimato = nettoBaseMensile + nettoStraordinario;
+  const lordoMeseStimato = stipendioBaseMensile + pagaStraordinarioTot;
+
+  const labelContratto = s.tipoContratto === "apprendistato" ? "Apprendistato" : "T. indeterminato";
+
   grid.innerHTML = `
     <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
     <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
-    <div class="summary-box"><div class="val">${pagaStraordinarioTot.toFixed(2)} €</div><div class="lab">Paga straordinario</div></div>
-    <div class="summary-box"><div class="val">${stimaLordo.toFixed(2)} €</div><div class="lab">Stima stipendio lordo</div></div>
-    <div class="summary-box" style="grid-column:1/3;"><div class="val">${stimaNetto.toFixed(2)} €</div><div class="lab">Stima netto (${s.percNetto}%)</div></div>
+    <div class="summary-box"><div class="val">${pagaStraordinarioTot.toFixed(2)} €</div><div class="lab">Straordinario lordo</div></div>
+    <div class="summary-box"><div class="val">${nettoStraordinario.toFixed(2)} €</div><div class="lab">Straordinario netto stimato</div></div>
+    <div class="summary-box"><div class="val">${lordoMeseStimato.toFixed(2)} €</div><div class="lab">Stima mese lordo</div></div>
+    <div class="summary-box"><div class="val">${nettoMeseStimato.toFixed(2)} €</div><div class="lab">Stima mese netto</div></div>
+    <div class="summary-box" style="grid-column:1/3;"><div class="lab">Calcolo con scaglioni IRPEF 2026, INPS e regole ${labelContratto} — non una semplice percentuale fissa.</div></div>
   `;
 }
 
@@ -187,16 +283,23 @@ function renderGiorniList(){
       </div>
       <div class="giorno-right">
         <div class="badge ${straord===0 ? 'zero':''}">${straord>0 ? minutesToHM(straord*60) : (g.tipo!=='normale' ? tipoLabel(g.tipo) : '0:00')}</div>
-        <button class="btn-danger" data-id="${g.id}">✕</button>
+        <button class="btn-edit" data-id="${g.id}" title="Modifica">✏️</button>
+        <button class="btn-danger" data-id="${g.id}" title="Elimina">✕</button>
       </div>
     `;
-    div.querySelector(".btn-danger").onclick = () => {
+    div.querySelector(".btn-danger").onclick = (e) => {
+      e.stopPropagation();
       if(confirm("Eliminare questa giornata?")){
         state.giorni = state.giorni.filter(x => x.id !== g.id);
         saveGiorni();
         renderAll();
       }
     };
+    div.querySelector(".btn-edit").onclick = (e) => {
+      e.stopPropagation();
+      apriModaleModifica(g);
+    };
+    div.addEventListener("click", () => apriModaleModifica(g));
     list.appendChild(div);
   });
 }
@@ -218,14 +321,11 @@ function checkOnboarding(){
 }
 
 on("btnOnboardSave", "click", () => {
-  const gT = document.getElementById("obGiorniTeorici");
-  const pG = document.getElementById("obPagaGiornata");
-  const pS = document.getElementById("obPagaStraordinario");
-  const pN = document.getElementById("obPercNetto");
-  state.settings.giorniTeorici = parseFloat(gT ? gT.value : "") || 22;
-  state.settings.pagaGiornata = parseFloat(pG ? pG.value : "") || 0;
-  state.settings.pagaStraordinario = parseFloat(pS ? pS.value : "") || 0;
-  state.settings.percNetto = parseFloat(pN ? pN.value : "") || 100;
+  const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  state.settings.tipoContratto = getVal("obTipoContratto") || "indeterminato";
+  state.settings.ralAnnua = parseFloat(getVal("obRalAnnua")) || 0;
+  state.settings.mensilita = parseInt(getVal("obMensilita")) || 13;
+  state.settings.pagaStraordinario = parseFloat(getVal("obPagaStraordinario")) || 0;
   saveSettings();
   localStorage.setItem(LS_ONBOARDED, "1");
   const ov = document.getElementById("onboardOverlay");
@@ -242,8 +342,6 @@ on("btnOnboardSkip", "click", () => {
 
 // ============================================================
 // ==== AUTO-FORMATTAZIONE CAMPI ORARIO (tastiera numerica) ====
-// Mentre l'utente digita solo cifre (es. "0827"), il campo si trasforma
-// automaticamente in "08:27" senza dover digitare i due punti.
 // ============================================================
 function formattaOrarioInput(el){
   el.addEventListener("input", () => {
@@ -278,10 +376,16 @@ function attivaTastieraNumericaOrari(){
   document.querySelectorAll("input.time-input").forEach(formattaOrarioInput);
 }
 
-// ==== MODAL NUOVA GIORNATA ====
+// ==== MODAL NUOVA/MODIFICA GIORNATA ====
 let tipoCorrente = "normale";
 
-on("btnAdd", "click", () => {
+function apriModaleNuova(){
+  giornoInModifica = null;
+  const modalTitolo = document.getElementById("modalTitolo");
+  if(modalTitolo) modalTitolo.textContent = "Nuova giornata";
+  const btnDelete = document.getElementById("btnDeleteFromModal");
+  if(btnDelete) btnDelete.style.display = "none";
+
   const fData = document.getElementById("fData");
   if(fData) fData.value = new Date().toISOString().slice(0,10);
   ["fE1","fU1","fE2","fU2","fOrarioIn","fOrarioOut"].forEach(id => {
@@ -292,11 +396,45 @@ on("btnAdd", "click", () => {
   setTipo("normale");
   const modalOverlay = document.getElementById("modalOverlay");
   if(modalOverlay) modalOverlay.classList.add("open");
-});
+}
+
+function apriModaleModifica(giorno){
+  giornoInModifica = giorno.id;
+  const modalTitolo = document.getElementById("modalTitolo");
+  if(modalTitolo) modalTitolo.textContent = "Modifica giornata";
+  const btnDelete = document.getElementById("btnDeleteFromModal");
+  if(btnDelete) btnDelete.style.display = "block";
+
+  const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val || ""; };
+  setVal("fData", giorno.data);
+  setVal("fE1", giorno.e1);
+  setVal("fU1", giorno.u1);
+  setVal("fE2", giorno.e2);
+  setVal("fU2", giorno.u2);
+  setVal("fOrarioIn", giorno.orarioIn || "08:30");
+  setVal("fOrarioOut", giorno.orarioOut || "17:00");
+  resetOcrUI();
+  setTipo(giorno.tipo || "normale");
+  const modalOverlay = document.getElementById("modalOverlay");
+  if(modalOverlay) modalOverlay.classList.add("open");
+}
+
+on("btnAdd", "click", apriModaleNuova);
 
 on("btnCancel", "click", () => {
   const modalOverlay = document.getElementById("modalOverlay");
   if(modalOverlay) modalOverlay.classList.remove("open");
+});
+
+on("btnDeleteFromModal", "click", () => {
+  if(!giornoInModifica) return;
+  if(confirm("Eliminare questa giornata?")){
+    state.giorni = state.giorni.filter(x => x.id !== giornoInModifica);
+    saveGiorni();
+    const modalOverlay = document.getElementById("modalOverlay");
+    if(modalOverlay) modalOverlay.classList.remove("open");
+    renderAll();
+  }
 });
 
 const modalOverlayEl = document.getElementById("modalOverlay");
@@ -325,8 +463,10 @@ on("btnSave", "click", () => {
 
   const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
 
-  const nuovaGiornata = {
-    id: Date.now().toString(),
+  const idDaUsare = giornoInModifica || Date.now().toString();
+
+  const giornataAggiornata = {
+    id: idDaUsare,
     data: data,
     tipo: tipoCorrente,
     e1: getVal("fE1"),
@@ -337,11 +477,15 @@ on("btnSave", "click", () => {
     orarioOut: getVal("fOrarioOut") || "17:00"
   };
 
-  state.giorni = state.giorni.filter(g => g.data !== data);
-  state.giorni.push(nuovaGiornata);
+  if(giornoInModifica){
+    state.giorni = state.giorni.filter(g => g.id !== giornoInModifica);
+  }
+  state.giorni = state.giorni.filter(g => g.data !== data || g.id === idDaUsare);
+  state.giorni.push(giornataAggiornata);
   saveGiorni();
 
   state.meseSelezionato = meseKeyOf(data);
+  giornoInModifica = null;
   const modalOverlay = document.getElementById("modalOverlay");
   if(modalOverlay) modalOverlay.classList.remove("open");
   renderAll();
@@ -350,10 +494,11 @@ on("btnSave", "click", () => {
 // ==== SETTINGS ====
 on("btnSettings", "click", () => {
   const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val || ""; };
-  setVal("sGiorniTeorici", state.settings.giorniTeorici);
-  setVal("sPagaGiornata", state.settings.pagaGiornata);
+  setVal("sTipoContratto", state.settings.tipoContratto || "indeterminato");
+  setVal("sRalAnnua", state.settings.ralAnnua);
+  setVal("sMensilita", state.settings.mensilita || 13);
   setVal("sPagaStraordinario", state.settings.pagaStraordinario);
-  setVal("sPercNetto", state.settings.percNetto);
+  setVal("sGiorniTeorici", state.settings.giorniTeorici || 22);
   const settingsOverlay = document.getElementById("settingsOverlay");
   if(settingsOverlay) settingsOverlay.classList.add("open");
   aggiornaStatoImport();
@@ -368,10 +513,11 @@ if(settingsOverlayEl){
 
 on("btnSettingsSave", "click", () => {
   const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
-  state.settings.giorniTeorici = parseFloat(getVal("sGiorniTeorici")) || 22;
-  state.settings.pagaGiornata = parseFloat(getVal("sPagaGiornata")) || 0;
+  state.settings.tipoContratto = getVal("sTipoContratto") || "indeterminato";
+  state.settings.ralAnnua = parseFloat(getVal("sRalAnnua")) || 0;
+  state.settings.mensilita = parseInt(getVal("sMensilita")) || 13;
   state.settings.pagaStraordinario = parseFloat(getVal("sPagaStraordinario")) || 0;
-  state.settings.percNetto = parseFloat(getVal("sPercNetto")) || 100;
+  state.settings.giorniTeorici = parseFloat(getVal("sGiorniTeorici")) || 22;
   saveSettings();
   const settingsOverlay = document.getElementById("settingsOverlay");
   if(settingsOverlay) settingsOverlay.classList.remove("open");
@@ -391,8 +537,6 @@ on("btnExport", "click", () => {
 
 // ============================================================
 // ==== IMPORT JSON CON CACHE PERMANENTE ====
-// L'input file e' attivato da un <label for="importInput"> HTML nativo
-// (piu' affidabile su Android rispetto a un .click() javascript).
 // ============================================================
 function aggiornaStatoImport(){
   const statusEl = document.getElementById("importStatus");
@@ -438,7 +582,6 @@ on("importInput", "change", (e) => {
 
 // ============================================================
 // ==== LETTURA OCR DA SCREENSHOT (Tesseract.js, on-device) ====
-// Anche qui gli input sono attivati da <label> HTML nativi.
 // ============================================================
 const ocrPreview = document.getElementById("ocrPreview");
 const ocrStatus = document.getElementById("ocrStatus");
