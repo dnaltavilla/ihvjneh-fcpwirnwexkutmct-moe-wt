@@ -1,4 +1,4 @@
-// ==== STRAORDINARI - LOGICA APP (OCR + import JSON + modifica + stima netto realistica) ====
+// ==== STRAORDINARI - LOGICA APP (OCR + import + modifica + netto realistico + fascia oraria) ====
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
@@ -7,6 +7,15 @@ const LS_IMPORTED = "straordinari_imported_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
                   "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+
+// Turno teorico fisso (i campi "orario previsto" sono stati rimossi dal modulo:
+// questi valori si applicano sempre a tutte le giornate "normale").
+const ORARIO_TEORICO_IN = "08:30";
+const ORARIO_TEORICO_OUT = "17:00";
+
+// Limiti contrattuali sullo straordinario
+const MAX_STRAORD_GIORNALIERO_MIN = 120; // 2 ore
+const MAX_STRAORD_MENSILE_MIN = 20 * 60; // 20 ore
 
 let state = {
   giorni: [],
@@ -20,7 +29,7 @@ let state = {
   meseSelezionato: null
 };
 
-let giornoInModifica = null; // id della giornata attualmente in editing, null = nuova
+let giornoInModifica = null;
 
 function on(id, evento, handler){
   const el = document.getElementById(id);
@@ -63,15 +72,22 @@ function minutesToHM(mins){
   return `${sign}${h}:${String(m).padStart(2,"0")}`;
 }
 function minutesToDecimal(mins){ return mins/60; }
+function minutesToClock(totMin){
+  totMin = ((totMin % 1440) + 1440) % 1440;
+  const h = Math.floor(totMin/60);
+  const m = totMin % 60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+}
 
 const PAUSA_MINIMA = 30;
 
-function calcolaStraordinario(g){
+// Calcola i minuti di straordinario GREZZI (prima di applicare i tetti contrattuali)
+function calcolaStraordinarioGrezzo(g){
   if(g.tipo !== "normale") return 0;
   const e1 = timeToMinutes(g.e1), u1 = timeToMinutes(g.u1);
   const e2 = timeToMinutes(g.e2), u2 = timeToMinutes(g.u2);
-  const orarioIn = timeToMinutes(g.orarioIn || "08:30");
-  const orarioOut = timeToMinutes(g.orarioOut || "17:00");
+  const orarioIn = timeToMinutes(ORARIO_TEORICO_IN);
+  const orarioOut = timeToMinutes(ORARIO_TEORICO_OUT);
   if(e1===null || u2===null) return 0;
 
   const pausaReale = (u1!==null && e2!==null && e2>u1) ? (e2-u1) : 0;
@@ -81,87 +97,30 @@ function calcolaStraordinario(g){
   const previsto = (orarioOut - orarioIn) - PAUSA_MINIMA;
 
   const diff = totaleLavorato - previsto;
-  return diff > 0 ? minutesToDecimal(diff) : 0;
+  return diff > 0 ? diff : 0;
 }
 
-// ============================================================
-// ==== MOTORE STIMA NETTO REALISTICO (IRPEF 2026 + INPS + apprendistato) ====
-// Stessa logica del progetto "ral-netto-calculator": scaglioni IRPEF 2026,
-// contributi INPS lavoratore 9,19%, differenza apprendistato/indeterminato,
-// applicata qui allo stipendio base + straordinari fatti nel mese.
-// ============================================================
-const ALIQUOTA_INPS_LAVORATORE = 0.0919; // aliquota standard dipendenti
-
-// Scaglioni IRPEF 2026 (Legge di Bilancio 2026)
-const SCAGLIONI_IRPEF_2026 = [
-  { fino: 28000, aliquota: 0.23 },
-  { fino: 50000, aliquota: 0.33 },
-  { fino: Infinity, aliquota: 0.43 }
-];
-
-function calcolaIrpefAnnua(imponibileAnnuo){
-  let imposta = 0;
-  let sogliaPrec = 0;
-  for(const scaglione of SCAGLIONI_IRPEF_2026){
-    if(imponibileAnnuo > sogliaPrec){
-      const base = Math.min(imponibileAnnuo, scaglione.fino) - sogliaPrec;
-      imposta += base * scaglione.aliquota;
-      sogliaPrec = scaglione.fino;
-    } else break;
-  }
-  return imposta;
+// Straordinario giornaliero APPLICANDO il tetto di 2h/giorno (in minuti)
+function calcolaStraordinarioMinutiCapGiorno(g){
+  const grezzo = calcolaStraordinarioGrezzo(g);
+  return Math.min(grezzo, MAX_STRAORD_GIORNALIERO_MIN);
 }
 
-// Detrazione lavoro dipendente 2026 (semplificata, decrescente con il reddito)
-function calcolaDetrazioneLavoroDipendente(imponibileAnnuo){
-  if(imponibileAnnuo <= 15000){
-    return Math.min(1955, imponibileAnnuo * 0.667 + 690);
-  } else if(imponibileAnnuo <= 28000){
-    return 1910 + 1190 * (28000 - imponibileAnnuo) / 13000;
-  } else if(imponibileAnnuo <= 50000){
-    return 1910 * (50000 - imponibileAnnuo) / 22000;
-  }
-  return 0;
+// Ore decimali per riepiloghi (compatibilita' con resto dell'app)
+function calcolaStraordinario(g){
+  return minutesToDecimal(calcolaStraordinarioMinutiCapGiorno(g));
 }
 
-// Bonus/cuneo fiscale 2026: esonero contributivo o detrazione fissa a seconda della fascia
-function calcolaCuneoFiscale(imponibileAnnuo){
-  if(imponibileAnnuo <= 8500) return imponibileAnnuo * 0.071;
-  if(imponibileAnnuo <= 15000) return imponibileAnnuo * 0.053;
-  if(imponibileAnnuo <= 20000) return imponibileAnnuo * 0.048;
-  if(imponibileAnnuo <= 32000) return 1000;
-  if(imponibileAnnuo <= 40000) return 1000 * (40000 - imponibileAnnuo) / 8000;
-  return 0;
-}
-
-// Calcola netto annuo/mensile da RAL lorda annua, tenendo conto di:
-// - contratto apprendistato: aliquota INPS lavoratore ridotta (5,84% vs 9,19% standard)
-// - scaglioni IRPEF 2026, detrazione lavoro dipendente, cuneo fiscale
-function calcolaNettoDaLordo(lordoAnnuo, tipoContratto){
-  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
-  const contributiInps = lordoAnnuo * aliquotaInps;
-  const imponibileFiscale = lordoAnnuo - contributiInps;
-
-  const irpefLorda = calcolaIrpefAnnua(imponibileFiscale);
-  const detrazione = calcolaDetrazioneLavoroDipendente(imponibileFiscale);
-  const cuneo = calcolaCuneoFiscale(imponibileFiscale);
-
-  const irpefNetta = Math.max(0, irpefLorda - detrazione);
-  const nettoAnnuo = lordoAnnuo - contributiInps - irpefNetta + cuneo;
-
-  return { nettoAnnuo, contributiInps, irpefNetta, cuneo, imponibileFiscale };
-}
-
-// Stima l'incidenza netta (%) di un euro aggiuntivo di straordinario,
-// usando l'aliquota marginale del proprio scaglione IRPEF + INPS.
-function percentualeNettaMarginale(ralAnnua, tipoContratto){
-  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
-  const imponibileStimato = ralAnnua * (1 - aliquotaInps);
-  let aliquotaMarginale = 0.23;
-  for(const scaglione of SCAGLIONI_IRPEF_2026){
-    if(imponibileStimato <= scaglione.fino){ aliquotaMarginale = scaglione.aliquota; break; }
-  }
-  return (1 - aliquotaInps) * (1 - aliquotaMarginale);
+// Calcola la fascia oraria "da-a" dello straordinario di una giornata,
+// calcolata A RITROSO dall'uscita serale reale (stessa logica di People Smart:
+// es. uscita reale 17:28, straordinario 31 min -> fascia 16:57/17:28).
+function calcolaFasciaStraordinario(g){
+  const minutiCap = calcolaStraordinarioMinutiCapGiorno(g);
+  if(minutiCap <= 0) return null;
+  const u2 = timeToMinutes(g.u2);
+  if(u2 === null) return null;
+  const inizio = u2 - minutiCap;
+  return `${minutesToClock(inizio)} / ${minutesToClock(u2)}`;
 }
 
 function meseKeyOf(dataStr){ return dataStr.slice(0,7); }
@@ -194,6 +153,75 @@ function renderTabs(){
   });
 }
 
+// ============================================================
+// ==== MOTORE STIMA NETTO REALISTICO (IRPEF 2026 + INPS + apprendistato) ====
+// ============================================================
+const ALIQUOTA_INPS_LAVORATORE = 0.0919;
+
+const SCAGLIONI_IRPEF_2026 = [
+  { fino: 28000, aliquota: 0.23 },
+  { fino: 50000, aliquota: 0.33 },
+  { fino: Infinity, aliquota: 0.43 }
+];
+
+function calcolaIrpefAnnua(imponibileAnnuo){
+  let imposta = 0;
+  let sogliaPrec = 0;
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
+    if(imponibileAnnuo > sogliaPrec){
+      const base = Math.min(imponibileAnnuo, scaglione.fino) - sogliaPrec;
+      imposta += base * scaglione.aliquota;
+      sogliaPrec = scaglione.fino;
+    } else break;
+  }
+  return imposta;
+}
+
+function calcolaDetrazioneLavoroDipendente(imponibileAnnuo){
+  if(imponibileAnnuo <= 15000){
+    return Math.min(1955, imponibileAnnuo * 0.667 + 690);
+  } else if(imponibileAnnuo <= 28000){
+    return 1910 + 1190 * (28000 - imponibileAnnuo) / 13000;
+  } else if(imponibileAnnuo <= 50000){
+    return 1910 * (50000 - imponibileAnnuo) / 22000;
+  }
+  return 0;
+}
+
+function calcolaCuneoFiscale(imponibileAnnuo){
+  if(imponibileAnnuo <= 8500) return imponibileAnnuo * 0.071;
+  if(imponibileAnnuo <= 15000) return imponibileAnnuo * 0.053;
+  if(imponibileAnnuo <= 20000) return imponibileAnnuo * 0.048;
+  if(imponibileAnnuo <= 32000) return 1000;
+  if(imponibileAnnuo <= 40000) return 1000 * (40000 - imponibileAnnuo) / 8000;
+  return 0;
+}
+
+function calcolaNettoDaLordo(lordoAnnuo, tipoContratto){
+  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
+  const contributiInps = lordoAnnuo * aliquotaInps;
+  const imponibileFiscale = lordoAnnuo - contributiInps;
+
+  const irpefLorda = calcolaIrpefAnnua(imponibileFiscale);
+  const detrazione = calcolaDetrazioneLavoroDipendente(imponibileFiscale);
+  const cuneo = calcolaCuneoFiscale(imponibileFiscale);
+
+  const irpefNetta = Math.max(0, irpefLorda - detrazione);
+  const nettoAnnuo = lordoAnnuo - contributiInps - irpefNetta + cuneo;
+
+  return { nettoAnnuo, contributiInps, irpefNetta, cuneo, imponibileFiscale };
+}
+
+function percentualeNettaMarginale(ralAnnua, tipoContratto){
+  const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
+  const imponibileStimato = ralAnnua * (1 - aliquotaInps);
+  let aliquotaMarginale = 0.23;
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
+    if(imponibileStimato <= scaglione.fino){ aliquotaMarginale = scaglione.aliquota; break; }
+  }
+  return (1 - aliquotaInps) * (1 - aliquotaMarginale);
+}
+
 function renderSummary(){
   const grid = document.getElementById("summaryGrid");
   if(!grid) return;
@@ -202,18 +230,27 @@ function renderSummary(){
   const giorniMese = state.giorni.filter(g => meseKeyOf(g.data) === mese)
                                   .sort((a,b)=> a.data.localeCompare(b.data));
 
-  const totaleOreStraordinario = giorniMese.reduce((acc,g) => acc + calcolaStraordinario(g), 0);
+  let totaleMinutiStraordinario = giorniMese.reduce((acc,g) => acc + calcolaStraordinarioMinutiCapGiorno(g), 0);
+  const oltreTettoMensile = totaleMinutiStraordinario > MAX_STRAORD_MENSILE_MIN;
+  const minutiEffettiviMensile = Math.min(totaleMinutiStraordinario, MAX_STRAORD_MENSILE_MIN);
+  const totaleOreStraordinario = minutesToDecimal(minutiEffettiviMensile);
+
   const giorniLavorati = giorniMese.filter(g => g.tipo === "normale").length;
 
   const s = state.settings;
+
+  const tettoBox = oltreTettoMensile
+    ? `<div class="summary-box warn" style="grid-column:1/3;"><div class="lab">⚠ Straordinario mensile grezzo ${minutesToHM(totaleMinutiStraordinario)}, limitato a 20h dal tetto contrattuale.</div></div>`
+    : "";
 
   if(!s.ralAnnua || s.ralAnnua === 0){
     grid.innerHTML = `
       <div class="summary-box" style="grid-column:1/3;">
         <div class="lab">Imposta RAL e tipo contratto in ⚙️ Impostazioni per vedere qui la stima netto realistica (scaglioni IRPEF 2026). I dati restano solo su questo telefono.</div>
       </div>
-      <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
+      <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale (max 20h/mese)</div></div>
       <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
+      ${tettoBox}
     `;
     return;
   }
@@ -234,12 +271,13 @@ function renderSummary(){
   const labelContratto = s.tipoContratto === "apprendistato" ? "Apprendistato" : "T. indeterminato";
 
   grid.innerHTML = `
-    <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale</div></div>
+    <div class="summary-box"><div class="val">${totaleOreStraordinario.toFixed(2)} h</div><div class="lab">Straordinario totale (max 20h/mese)</div></div>
     <div class="summary-box"><div class="val">${giorniLavorati}</div><div class="lab">Giorni lavorati</div></div>
     <div class="summary-box"><div class="val">${pagaStraordinarioTot.toFixed(2)} €</div><div class="lab">Straordinario lordo</div></div>
     <div class="summary-box"><div class="val">${nettoStraordinario.toFixed(2)} €</div><div class="lab">Straordinario netto stimato</div></div>
     <div class="summary-box"><div class="val">${lordoMeseStimato.toFixed(2)} €</div><div class="lab">Stima mese lordo</div></div>
     <div class="summary-box"><div class="val">${nettoMeseStimato.toFixed(2)} €</div><div class="lab">Stima mese netto</div></div>
+    ${tettoBox}
     <div class="summary-box" style="grid-column:1/3;"><div class="lab">Calcolo con scaglioni IRPEF 2026, INPS e regole ${labelContratto} — non una semplice percentuale fissa.</div></div>
   `;
 }
@@ -263,7 +301,9 @@ function renderGiorniList(){
 
   list.innerHTML = "";
   giorniMese.forEach(g => {
-    const straord = calcolaStraordinario(g);
+    const minutiCap = calcolaStraordinarioMinutiCapGiorno(g);
+    const grezzo = calcolaStraordinarioGrezzo(g);
+    const fasciaOraria = calcolaFasciaStraordinario(g);
     const dataObj = new Date(g.data + "T00:00:00");
     const giornoLabel = dataObj.toLocaleDateString("it-IT", {weekday:"short", day:"2-digit", month:"short"});
 
@@ -274,15 +314,24 @@ function renderGiorniList(){
       orariStr = `${g.e1||"--"} · ${g.u1||"--"} / ${g.e2||"--"} · ${g.u2||"--"}`;
     }
 
+    const cappato = grezzo > MAX_STRAORD_GIORNALIERO_MIN;
+    const badgeClass = minutiCap===0 ? 'zero' : (cappato ? 'capped' : '');
+    const badgeTesto = minutiCap>0 ? minutesToHM(minutiCap) : (g.tipo!=='normale' ? tipoLabel(g.tipo) : '0:00');
+
+    const fasciaHtml = fasciaOraria
+      ? `<div class="giorno-fascia-straord">🕐 ${fasciaOraria}${cappato ? ' (limitato a 2h)' : ''}</div>`
+      : "";
+
     const div = document.createElement("div");
     div.className = "giorno-item";
     div.innerHTML = `
       <div class="giorno-left">
         <div class="giorno-data">${giornoLabel}</div>
         <div class="giorno-orari">${orariStr}</div>
+        ${fasciaHtml}
       </div>
       <div class="giorno-right">
-        <div class="badge ${straord===0 ? 'zero':''}">${straord>0 ? minutesToHM(straord*60) : (g.tipo!=='normale' ? tipoLabel(g.tipo) : '0:00')}</div>
+        <div class="badge ${badgeClass}">${badgeTesto}</div>
         <button class="btn-edit" data-id="${g.id}" title="Modifica">✏️</button>
         <button class="btn-danger" data-id="${g.id}" title="Elimina">✕</button>
       </div>
@@ -388,7 +437,7 @@ function apriModaleNuova(){
 
   const fData = document.getElementById("fData");
   if(fData) fData.value = new Date().toISOString().slice(0,10);
-  ["fE1","fU1","fE2","fU2","fOrarioIn","fOrarioOut"].forEach(id => {
+  ["fE1","fU1","fE2","fU2"].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.value = "";
   });
@@ -411,8 +460,6 @@ function apriModaleModifica(giorno){
   setVal("fU1", giorno.u1);
   setVal("fE2", giorno.e2);
   setVal("fU2", giorno.u2);
-  setVal("fOrarioIn", giorno.orarioIn || "08:30");
-  setVal("fOrarioOut", giorno.orarioOut || "17:00");
   resetOcrUI();
   setTipo(giorno.tipo || "normale");
   const modalOverlay = document.getElementById("modalOverlay");
@@ -473,8 +520,8 @@ on("btnSave", "click", () => {
     u1: getVal("fU1"),
     e2: getVal("fE2"),
     u2: getVal("fU2"),
-    orarioIn: getVal("fOrarioIn") || "08:30",
-    orarioOut: getVal("fOrarioOut") || "17:00"
+    orarioIn: ORARIO_TEORICO_IN,
+    orarioOut: ORARIO_TEORICO_OUT
   };
 
   if(giornoInModifica){
