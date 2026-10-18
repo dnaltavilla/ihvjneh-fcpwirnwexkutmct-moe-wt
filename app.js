@@ -8,8 +8,8 @@ const LS_IMPORTED = "straordinari_imported_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 
-const ORARIO_TEORICO_IN = "08:30";
-const ORARIO_TEORICO_OUT = "17:00";
+const ORARIO_TEORICO_IN = "08:00";
+const ORARIO_TEORICO_OUT = "16:30";
 const ORARIO_INIZIO_CONTEGGIO = "08:00";   // se entri prima, conta dalle 08:00
 const PAUSA_MINIMA = 30;
 const MAX_STRAORD_GIORNALIERO_MIN = 120;   // 2 ore
