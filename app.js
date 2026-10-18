@@ -1,10 +1,11 @@
-// STRAORDINARI - LOGICA APP (OCR on-device, import/export, stima netto, simulazione)
+// STRAORDINARI - LOGICA APP (OCR on-device Home/Agenda, import/export, stima netto, simulazione)
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
 
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
 const LS_ONBOARDED = "straordinari_onboarded_v1";
 const LS_IMPORTED = "straordinari_imported_v1";
+const LS_SCHERMATA = "straordinari_schermata_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 
@@ -21,14 +22,15 @@ let state = {
   meseSelezionato: null
 };
 let giornoInModifica = null;
+let schermataOcr = localStorage.getItem(LS_SCHERMATA) === "agenda" ? "agenda" : "home";
 
+function $(id){ return document.getElementById(id); }
 function on(id, evento, handler){
-  const el = document.getElementById(id);
+  const el = $(id);
   if(el){ el.addEventListener(evento, handler); return el; }
   console.warn("Elemento id non trovato: " + id + " - verifica che index.html sia aggiornato insieme a app.js");
   return null;
 }
-function $(id){ return document.getElementById(id); }
 function openOv(id){ const e=$(id); if(e) e.classList.add("open"); }
 function closeOv(id){ const e=$(id); if(e) e.classList.remove("open"); }
 
@@ -117,60 +119,76 @@ function renderTabs(){
 
 // ==== STIMA NETTO (IRPEF 2026 / INPS) ====
 const ALIQUOTA_INPS_LAVORATORE = 0.0919;
+
 const SCAGLIONI_IRPEF_2026 = [
   { fino: 28000, aliquota: 0.23 },
   { fino: 50000, aliquota: 0.33 },
   { fino: Infinity, aliquota: 0.43 }
 ];
+
 function calcolaIrpefAnnua(imponibileAnnuo){
-  let imposta = 0, sogliaPrec = 0;
-  for(const sc of SCAGLIONI_IRPEF_2026){
+  let imposta = 0;
+  let sogliaPrec = 0;
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
     if(imponibileAnnuo > sogliaPrec){
-      const base = Math.min(imponibileAnnuo, sc.fino) - sogliaPrec;
-      imposta += base * sc.aliquota;
-      sogliaPrec = sc.fino;
+      const base = Math.min(imponibileAnnuo, scaglione.fino) - sogliaPrec;
+      imposta += base * scaglione.aliquota;
+      sogliaPrec = scaglione.fino;
     } else break;
   }
   return imposta;
 }
-function calcolaDetrazioneLavoroDipendente(imp){
-  if(imp <= 15000) return Math.max(690, Math.min(1955, 1955));
-  if(imp <= 28000) return 1910 + 1190 * ((28000 - imp) / 13000);
-  if(imp <= 50000) return 1910 * ((50000 - imp) / 22000);
+
+function calcolaDetrazioneLavoroDipendente(imponibileAnnuo){
+  if(imponibileAnnuo <= 15000){
+    return Math.min(1955, imponibileAnnuo * 0.667 + 690);
+  } else if(imponibileAnnuo <= 28000){
+    return 1910 + 1190 * (28000 - imponibileAnnuo) / 13000;
+  } else if(imponibileAnnuo <= 50000){
+    return 1910 * (50000 - imponibileAnnuo) / 22000;
+  }
   return 0;
 }
-function calcolaCuneoFiscale(imp){
-  if(imp <= 8500) return imp * 0.071;
-  if(imp <= 15000) return imp * 0.053;
-  if(imp <= 20000) return imp * 0.048;
-  if(imp <= 32000) return 1000;
-  if(imp <= 40000) return 1000 * ((40000 - imp) / 8000);
+
+function calcolaCuneoFiscale(imponibileAnnuo){
+  if(imponibileAnnuo <= 8500) return imponibileAnnuo * 0.071;
+  if(imponibileAnnuo <= 15000) return imponibileAnnuo * 0.053;
+  if(imponibileAnnuo <= 20000) return imponibileAnnuo * 0.048;
+  if(imponibileAnnuo <= 32000) return 1000;
+  if(imponibileAnnuo <= 40000) return 1000 * (40000 - imponibileAnnuo) / 8000;
   return 0;
 }
+
 function calcolaNettoDaLordo(lordoAnnuo, tipoContratto){
   const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
   const contributiInps = lordoAnnuo * aliquotaInps;
   const imponibileFiscale = lordoAnnuo - contributiInps;
+
   const irpefLorda = calcolaIrpefAnnua(imponibileFiscale);
   const detrazione = calcolaDetrazioneLavoroDipendente(imponibileFiscale);
   const cuneo = calcolaCuneoFiscale(imponibileFiscale);
+
   const irpefNetta = Math.max(0, irpefLorda - detrazione);
-  return lordoAnnuo - contributiInps - irpefNetta + cuneo;
+  const nettoAnnuo = lordoAnnuo - contributiInps - irpefNetta + cuneo;
+
+  return { nettoAnnuo, contributiInps, irpefNetta, cuneo, imponibileFiscale };
 }
+
 function percentualeNettaMarginale(ralAnnua, tipoContratto){
   const aliquotaInps = tipoContratto === "apprendistato" ? 0.0584 : ALIQUOTA_INPS_LAVORATORE;
   const imponibileStimato = ralAnnua * (1 - aliquotaInps);
   let aliquotaMarginale = 0.23;
-  for(const sc of SCAGLIONI_IRPEF_2026){
-    if(imponibileStimato <= sc.fino){ aliquotaMarginale = sc.aliquota; break; }
+  for(const scaglione of SCAGLIONI_IRPEF_2026){
+    if(imponibileStimato <= scaglione.fino){ aliquotaMarginale = scaglione.aliquota; break; }
   }
   return (1 - aliquotaInps) * (1 - aliquotaMarginale);
 }
-// Stima mensile: fisso e straordinari tenuti separati
+
+
 function stimaMensile(ral, mensilita, tipo, oreStraord, pagaOraria){
   mensilita = mensilita || 13;
   const fissoLordo = ral / mensilita;
-  const fissoNetto = calcolaNettoDaLordo(ral, tipo) / mensilita;
+  const fissoNetto = calcolaNettoDaLordo(ral, tipo).nettoAnnuo / mensilita;
   const strLordo = oreStraord * (pagaOraria || 0);
   const strNetto = strLordo * percentualeNettaMarginale(ral, tipo);
   return { fissoLordo, fissoNetto, strLordo, strNetto,
@@ -192,7 +210,6 @@ function renderSummary(){
   const { totMin, effMin } = oreStraordMeseCorrente();
   const oltreTetto = totMin > MAX_STRAORD_MENSILE_MIN;
   const ore = minutesToDecimal(effMin);
-  const giorniConStraord = giorniMese.filter(g => calcolaStraordinarioMinutiCapGiorno(g) > 0).length;
   const s = state.settings;
   const box = (val, lab, cls) => '<div class="summary-box ' + (cls||"") + '"><div class="val">' + val + '</div><div class="lab">' + lab + '</div></div>';
   const tettoBox = oltreTetto
@@ -218,9 +235,7 @@ function renderSummary(){
   grid.innerHTML = html;
 }
 
-function tipoLabel(t){
-  return ({permesso:"Permesso", ferie:"Ferie", malattia:"Malattia"})[t] || "";
-}
+function tipoLabel(t){ return ({permesso:"Permesso", ferie:"Ferie", malattia:"Malattia"})[t] || ""; }
 function renderGiorniList(){
   const list = $("giorniList");
   if(!list) return;
@@ -281,7 +296,7 @@ on("btnOnboardSave","click",() => {
 on("btnOnboardSkip","click",() => { localStorage.setItem(LS_ONBOARDED,"1"); closeOv("onboardOverlay"); renderAll(); });
 
 // ==== CAMPI ORARIO: input intelligente ====
-// "800" -> 08:00, "1745" -> 17:45. Cifre non valide (es. ora > 23, minuti > 59) vengono ignorate.
+// "800" -> 08:00, "1745" -> 17:45. Cifre non valide (ora > 23, minuti > 59) vengono ignorate.
 const CAMPI_ORARIO = ["fE1","fU1","fE2","fU2"];
 
 function costruisciOrario(cifre){
@@ -300,8 +315,7 @@ function costruisciOrario(cifre){
     }
   }
   const completo = hs.length === 2 && ms.length === 2;
-  let testo = hs;
-  if(hs.length === 2) testo = hs + ":" + ms;
+  const testo = hs.length === 2 ? hs + ":" + ms : hs;
   return { testo, completo };
 }
 function orarioValido(t){ return /^([01]\d|2[0-3]):[0-5]\d$/.test(t); }
@@ -321,12 +335,9 @@ function formattaOrarioInput(el, idx){
   el.addEventListener("focus", () => { if(el.select) el.select(); });
   el.addEventListener("blur", () => {
     if(!el.value) return;
-    const r = costruisciOrario(el.value.replace(/\D/g,""));
-    if(r.completo) { el.value = r.testo; return; }
-    // incompleto: completo con zeri (es. "08" -> 08:00, "08:3" -> 08:30)
     const cifre = el.value.replace(/\D/g,"");
-    const r2 = costruisciOrario((cifre + "0000").slice(0,4 > cifre.length ? 4 : cifre.length));
-    el.value = r2.completo ? r2.testo : "";
+    const r = costruisciOrario((cifre + "0000").slice(0,4));
+    el.value = r.completo ? r.testo : "";
   });
 }
 function attivaTastieraNumericaOrari(){
@@ -348,7 +359,7 @@ function apriModaleNuova(){
   const d=$("btnDeleteFromModal"); if(d) d.style.display="none";
   const fd=$("fData"); if(fd) fd.value=new Date().toISOString().slice(0,10);
   CAMPI_ORARIO.forEach(id => { const el=$(id); if(el) el.value=""; });
-  resetOcrUI(); openOv("modalOverlay");
+  resetOcrUI(); aggiornaChipSchermata(); openOv("modalOverlay");
 }
 function apriModaleModifica(g){
   giornoInModifica = g.id;
@@ -356,7 +367,7 @@ function apriModaleModifica(g){
   const d=$("btnDeleteFromModal"); if(d) d.style.display="block";
   const set=(id,v)=>{ const el=$(id); if(el) el.value=v||""; };
   set("fData",g.data); set("fE1",g.e1); set("fU1",g.u1); set("fE2",g.e2); set("fU2",g.u2);
-  resetOcrUI(); openOv("modalOverlay");
+  resetOcrUI(); aggiornaChipSchermata(); openOv("modalOverlay");
 }
 on("btnAdd","click",apriModaleNuova);
 on("btnCancel","click",() => closeOv("modalOverlay"));
@@ -375,7 +386,7 @@ on("btnSave","click",() => {
   const val = {};
   for(const id of CAMPI_ORARIO){
     const v = ($(id).value || "").trim();
-    if(v && !orarioValido(v)){ alert("Orario non valido nel campo " + id.replace("f","") + ": usa HH:MM tra 00:00 e 23:59."); $(id).focus(); return; }
+    if(v && !orarioValido(v)){ alert("Orario non valido (" + id.replace("f","") + "): usa HH:MM tra 00:00 e 23:59."); $(id).focus(); return; }
     val[id] = v;
   }
   const idDaUsare = giornoInModifica || Date.now().toString();
@@ -497,6 +508,13 @@ if(simOverlayEl) simOverlayEl.addEventListener("click", e => { if(e.target === s
 on("ocrInputCamera","change",(e) => processaImmagine(e.target.files[0]));
 on("ocrInputGallery","change",(e) => processaImmagine(e.target.files[0]));
 
+function aggiornaChipSchermata(){
+  document.querySelectorAll("#schermataChips .chip").forEach(c => c.classList.toggle("active", c.dataset.schermata === schermataOcr));
+}
+document.querySelectorAll("#schermataChips .chip").forEach(c => {
+  c.onclick = () => { schermataOcr = c.dataset.schermata; localStorage.setItem(LS_SCHERMATA, schermataOcr); aggiornaChipSchermata(); };
+});
+
 async function processaImmagine(file){
   if(!file) return;
   const ocrPreview=$("ocrPreview"), ocrStatus=$("ocrStatus"), ocrStatusText=$("ocrStatusText"), ocrBanner=$("ocrBanner");
@@ -517,24 +535,31 @@ async function processaImmagine(file){
       logger: m => { if(m.status==="recognizing text" && ocrStatusText) ocrStatusText.textContent="Lettura testo... " + Math.round(m.progress*100) + "%"; }
     });
     const testo = result.data.text;
-    const tutti = estraiOrariTimbrature(testo);
-    const orari = selezionaQuattroOrari(tutti);
+    const r = leggiScreenshot(testo, schermataOcr);
     if(ocrStatus) ocrStatus.style.display="none";
-    if(orari.length === 4){
-      setVal("fE1",orari[0]); setVal("fU1",orari[1]); setVal("fE2",orari[2]); setVal("fU2",orari[3]);
-      if(ocrBanner){
-        ocrBanner.textContent = "Rilevati " + tutti.length + " orari nella riga TIMBRATURE: usati " + orari.join(" · ") + (tutti.length>4 ? " (ingresso, uscita pranzo, rientro pranzo, uscita finale)" : "") + ". Controlla e correggi se serve.";
-        ocrBanner.className="ocr-result-banner ok";
+    const ids = ["fE1","fU1","fE2","fU2"];
+    const trovati = r.orari.filter(x => x).length;
+    if(trovati > 0) ids.forEach((id,i) => setVal(id, r.orari[i] || ""));
+    const nomeSch = r.schermata === "agenda" ? "Agenda" : "Home";
+    if(ocrBanner){
+      if(trovati === 4){
+        ocrBanner.textContent = "Schermata " + nomeSch + (r.cambiata ? " (riconosciuta automaticamente)" : "") + ": letti " + r.totale + " orari, usati " + r.orari.join(" · ") + (r.totale > 4 ? " (ingresso, uscita pranzo, rientro pranzo, uscita finale)" : "") + ". Controlla e correggi se serve.";
+        ocrBanner.className = "ocr-result-banner ok";
+      } else if(trovati > 0){
+        ocrBanner.textContent = "Schermata " + nomeSch + ": rilevati solo " + trovati + "/4 orari. Completa manualmente i campi mancanti.";
+        ocrBanner.className = "ocr-result-banner warn";
+      } else {
+        ocrBanner.textContent = "Nessuna timbratura trovata come schermata " + nomeSch + ". Controlla di aver scelto il tipo giusto (Home / Agenda) oppure inserisci i valori a mano.";
+        ocrBanner.className = "ocr-result-banner warn";
       }
-    } else if(orari.length > 0){
-      const ids=["fE1","fU1","fE2","fU2"];
-      orari.forEach((v,i) => setVal(ids[i],v));
-      if(ocrBanner){ ocrBanner.textContent="Rilevati solo " + orari.length + "/4 orari nella riga TIMBRATURE. Completa manualmente i campi mancanti."; ocrBanner.className="ocr-result-banner warn"; }
-    } else if(ocrBanner){
-      ocrBanner.textContent="Non ho trovato la riga TIMBRATURE nello screenshot. Inserisci i valori manualmente qui sotto."; ocrBanner.className="ocr-result-banner warn";
     }
     const dataRilevata = estraiData(testo);
-    if(dataRilevata) setVal("fData",dataRilevata);
+    if(dataRilevata){
+      setVal("fData", dataRilevata);
+    } else if(r.schermata === "agenda"){
+      setVal("fData", "");
+      if(ocrBanner){ ocrBanner.textContent += " Nell'Agenda il giorno non e' leggibile: seleziona la data."; ocrBanner.className = "ocr-result-banner warn"; }
+    }
   }catch(err){
     console.error(err);
     if(ocrStatus) ocrStatus.style.display="none";
@@ -566,6 +591,7 @@ function preprocessImage(imgUrl){
   });
 }
 
+// ---- Schermata HOME: riquadro TIMBRATURE ----
 function estraiOrariTimbrature(testo){
   const pulito = testo.replace(/[oO](?=\d|\s|$)/g, "0").replace(/[lI](?=\d|\s|$)/g, "1");
   const idxTimbrature = pulito.search(/TIMBRATUR/i);
@@ -585,9 +611,8 @@ function estraiOrariTimbrature(testo){
   }
   return trovati;
 }
-
-// Da N timbrature (E,U,E,U,...) ricava: ingresso, uscita pranzo, rientro pranzo, uscita finale.
-// La pausa pranzo e' l'intervallo uscita->rientro piu' lungo; le altre uscite brevi vengono ignorate.
+// N timbrature -> ingresso, uscita pranzo, rientro pranzo, uscita finale.
+// Pranzo = intervallo uscita->rientro piu' lungo; le uscite brevi vengono ignorate.
 function selezionaQuattroOrari(tutti){
   const n = tutti.length;
   if(n <= 4) return tutti.slice();
@@ -603,6 +628,50 @@ function selezionaQuattroOrari(tutti){
   return [tutti[0], tutti[1], tutti[2], tutti[n-1]];
 }
 
+// ---- Schermata AGENDA: righe "HH:MM Timbratura Entrata/Uscita" ----
+// Ignora "Turno previsto" e "TOT. ORE", che non sono timbrature.
+function estraiTimbratureAgenda(testo){
+  const regex = /([01]?\d|2[0-3])[:.]([0-5]\d)[^\dA-Za-z\n]{0,3}\s*T\w{2,3}bratur\w*\s+(E|U)/gi;
+  const items = [];
+  let m;
+  while((m = regex.exec(testo)) !== null){
+    items.push({ t: m[1].padStart(2,"0") + ":" + m[2], k: m[3].toUpperCase() });
+  }
+  return items;
+}
+// Ingresso = prima Entrata; uscita finale = ultima Uscita; pranzo = coppia Uscita->Entrata piu' lunga.
+function selezioneConTipi(items){
+  if(items.length === 0) return ["","","",""];
+  const iIn = Math.max(0, items.findIndex(x => x.k === "E"));
+  let iOut = -1;
+  for(let i=items.length-1; i>=0; i--){ if(items[i].k === "U"){ iOut = i; break; } }
+  if(iOut < 0 || iOut <= iIn) return [items[iIn].t,"","",""];
+  let best = -1, bestGap = -1;
+  for(let i=iIn+1; i<iOut; i++){
+    if(items[i].k === "U" && items[i+1] && items[i+1].k === "E"){
+      const gap = timeToMinutes(items[i+1].t) - timeToMinutes(items[i].t);
+      if(gap > bestGap){ bestGap = gap; best = i; }
+    }
+  }
+  if(best < 0) return [items[iIn].t,"","",items[iOut].t];
+  return [items[iIn].t, items[best].t, items[best+1].t, items[iOut].t];
+}
+
+function leggiScreenshot(testo, schermata){
+  const haHeaderHome = /TIMBRATUR/i.test(testo);
+  const agenda = estraiTimbratureAgenda(testo);
+  let usa = schermata, cambiata = false;
+  if(schermata === "agenda" && agenda.length === 0 && haHeaderHome){ usa = "home"; cambiata = true; }
+  else if(schermata === "home" && !haHeaderHome && agenda.length > 0){ usa = "agenda"; cambiata = true; }
+  if(usa === "agenda"){
+    return { schermata:"agenda", cambiata, totale:agenda.length, orari:selezioneConTipi(agenda) };
+  }
+  const tutti = haHeaderHome ? estraiOrariTimbrature(testo) : [];
+  const sel = selezionaQuattroOrari(tutti);
+  while(sel.length < 4) sel.push("");
+  return { schermata:"home", cambiata, totale:tutti.length, orari:sel };
+}
+
 function estraiData(testo){
   const mesiMap = {
     gennaio:1, gen:1, febbraio:2, feb:2, marzo:3, mar:3, aprile:4, apr:4,
@@ -616,12 +685,6 @@ function estraiData(testo){
     const mese = mesiMap[m[2].toLowerCase()];
     if(mese) return m[3] + "-" + String(mese).padStart(2,"0") + "-" + giorno;
   }
-  m = testo.match(/(\d{1,2})[\s\-\/]([A-Za-z]{3})/);
-  if(m){
-    const giorno = m[1].padStart(2,"0");
-    const mese = mesiMap[m[2].toLowerCase()];
-    if(mese) return new Date().getFullYear() + "-" + String(mese).padStart(2,"0") + "-" + giorno;
-  }
   return null;
 }
 
@@ -630,6 +693,7 @@ loadState();
 renderAll();
 checkOnboarding();
 attivaTastieraNumericaOrari();
+aggiornaChipSchermata();
 
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => {
