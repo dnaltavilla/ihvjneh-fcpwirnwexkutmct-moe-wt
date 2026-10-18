@@ -1,4 +1,4 @@
-const CACHE_NAME = "straordinari-cache-v9";
+const CACHE_NAME = "straordinari-cache-v10";
 const FILES_TO_CACHE = [
   "./index.html",
   "./app.js",
