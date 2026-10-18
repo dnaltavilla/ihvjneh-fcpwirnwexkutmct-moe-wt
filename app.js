@@ -9,8 +9,8 @@ const LS_SCHERMATA = "straordinari_schermata_v1";
 
 const MESI_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 
-const ORARIO_TEORICO_IN = "08:00";
-const ORARIO_TEORICO_OUT = "16:30";
+const ORARIO_TEORICO_IN = "08:30";
+const ORARIO_TEORICO_OUT = "17:00";
 const ORARIO_INIZIO_CONTEGGIO = "08:00";   // se entri prima, conta dalle 08:00
 const PAUSA_MINIMA = 30;
 const MAX_STRAORD_GIORNALIERO_MIN = 120;   // 2 ore
@@ -515,9 +515,44 @@ document.querySelectorAll("#schermataChips .chip").forEach(c => {
   c.onclick = () => { schermataOcr = c.dataset.schermata; localStorage.setItem(LS_SCHERMATA, schermataOcr); aggiornaChipSchermata(); };
 });
 
+function punteggioLettura(r){
+  return r.orari.filter(x => x).length * 10 + (r.completo ? 100 : 0) + Math.min(r.totale, 8);
+}
+
+// Lettura in 1-2 passate: prima immagine in bianco/nero; se il risultato non e' completo,
+// seconda passata in scala di grigi con contrasto. Si tiene la lettura migliore.
+async function eseguiOcr(imgUrl, setTesto){
+  const logger = (m) => { if(m.status === "recognizing text") setTesto("Lettura testo... " + Math.round(m.progress*100) + "%"); };
+  let worker = null;
+  try{
+    worker = await Tesseract.createWorker("ita+eng", 1, { logger });
+    await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" });
+  }catch(e){ console.warn("Worker non disponibile, uso recognize()", e); worker = null; }
+  const run = async (canvas) => {
+    if(worker) return (await worker.recognize(canvas)).data.text;
+    return (await Tesseract.recognize(canvas, "ita+eng", { logger })).data.text;
+  };
+  try{
+    const c1 = await preprocessImage(imgUrl, true);
+    let testo = await run(c1);
+    let r = leggiScreenshot(testo, schermataOcr);
+    if(!r.completo){
+      setTesto("Seconda lettura per maggiore precisione...");
+      const c2 = await preprocessImage(imgUrl, false);
+      const testo2 = await run(c2);
+      const r2 = leggiScreenshot(testo2, schermataOcr);
+      if(punteggioLettura(r2) > punteggioLettura(r)){ testo = testo2; r = r2; }
+    }
+    return { testo, r };
+  } finally {
+    if(worker){ try{ await worker.terminate(); }catch(e){} }
+  }
+}
+
 async function processaImmagine(file){
   if(!file) return;
   const ocrPreview=$("ocrPreview"), ocrStatus=$("ocrStatus"), ocrStatusText=$("ocrStatusText"), ocrBanner=$("ocrBanner");
+  const setTesto = (t) => { if(ocrStatusText) ocrStatusText.textContent = t; };
   if(typeof Tesseract === "undefined"){
     if(ocrBanner){ ocrBanner.textContent="Motore OCR non disponibile: verifica la connessione internet al primo utilizzo. Inserisci gli orari manualmente."; ocrBanner.className="ocr-result-banner warn"; }
     return;
@@ -526,40 +561,39 @@ async function processaImmagine(file){
   if(ocrPreview){ ocrPreview.src=imgUrl; ocrPreview.style.display="block"; }
   if(ocrBanner) ocrBanner.style.display="none";
   if(ocrStatus) ocrStatus.style.display="flex";
-  if(ocrStatusText) ocrStatusText.textContent="Preparazione immagine...";
+  setTesto("Preparazione immagine...");
   const setVal=(id,v)=>{ const el=$(id); if(el) el.value=v; };
   try{
-    const canvas = await preprocessImage(imgUrl);
-    if(ocrStatusText) ocrStatusText.textContent="Lettura testo in corso...";
-    const result = await Tesseract.recognize(canvas,"ita+eng",{
-      logger: m => { if(m.status==="recognizing text" && ocrStatusText) ocrStatusText.textContent="Lettura testo... " + Math.round(m.progress*100) + "%"; }
-    });
-    const testo = result.data.text;
-    const r = leggiScreenshot(testo, schermataOcr);
+    const { testo, r } = await eseguiOcr(imgUrl, setTesto);
     if(ocrStatus) ocrStatus.style.display="none";
     const ids = ["fE1","fU1","fE2","fU2"];
     const trovati = r.orari.filter(x => x).length;
     if(trovati > 0) ids.forEach((id,i) => setVal(id, r.orari[i] || ""));
     const nomeSch = r.schermata === "agenda" ? "Agenda" : "Home";
-    if(ocrBanner){
-      if(trovati === 4){
-        ocrBanner.textContent = "Schermata " + nomeSch + (r.cambiata ? " (riconosciuta automaticamente)" : "") + ": letti " + r.totale + " orari, usati " + r.orari.join(" · ") + (r.totale > 4 ? " (ingresso, uscita pranzo, rientro pranzo, uscita finale)" : "") + ". Controlla e correggi se serve.";
-        ocrBanner.className = "ocr-result-banner ok";
-      } else if(trovati > 0){
-        ocrBanner.textContent = "Schermata " + nomeSch + ": rilevati solo " + trovati + "/4 orari. Completa manualmente i campi mancanti.";
-        ocrBanner.className = "ocr-result-banner warn";
-      } else {
-        ocrBanner.textContent = "Nessuna timbratura trovata come schermata " + nomeSch + ". Controlla di aver scelto il tipo giusto (Home / Agenda) oppure inserisci i valori a mano.";
-        ocrBanner.className = "ocr-result-banner warn";
-      }
+    const auto = r.cambiata ? " (riconosciuta automaticamente)" : "";
+    let msg, cls;
+    if(r.completo){
+      msg = "Schermata " + nomeSch + auto + ": letti " + r.totale + " orari, usati " + r.orari.join(" · ") + (r.totale > 4 ? " (ingresso, uscita pranzo, rientro pranzo, uscita finale)" : "") + ". Controlla e correggi se serve.";
+      cls = "ok";
+    } else if(trovati > 0){
+      const nomi = ["Entrata mattina","Uscita pausa","Rientro pausa","Uscita sera"];
+      const mancanti = r.orari.map((v,i) => v ? null : nomi[i]).filter(x => x);
+      msg = "Schermata " + nomeSch + auto + ": letti " + r.totale + " orari ma ne mancano " + (4-trovati) + " (" + mancanti.join(", ") + "). Compila a mano i campi vuoti e controlla gli altri.";
+      if(r.ingressoMancante && r.suggerimentoIngresso) msg += " Dal Turno previsto l'ingresso potrebbe essere " + r.suggerimentoIngresso + " (da verificare).";
+      cls = "warn";
+    } else {
+      msg = "Nessuna timbratura trovata come schermata " + nomeSch + ". Controlla di aver scelto il tipo giusto (Home / Agenda) oppure inserisci i valori a mano.";
+      cls = "warn";
     }
+    if(r.totale % 2 === 1 && r.completo) { msg += " Attenzione: numero di timbrature dispari, controlla."; cls = "warn"; }
     const dataRilevata = estraiData(testo);
     if(dataRilevata){
       setVal("fData", dataRilevata);
     } else if(r.schermata === "agenda"){
       setVal("fData", "");
-      if(ocrBanner){ ocrBanner.textContent += " Nell'Agenda il giorno non e' leggibile: seleziona la data."; ocrBanner.className = "ocr-result-banner warn"; }
+      msg += " Nell'Agenda il giorno non e' leggibile: seleziona la data."; cls = "warn";
     }
+    if(ocrBanner){ ocrBanner.textContent = msg; ocrBanner.className = "ocr-result-banner " + cls; }
   }catch(err){
     console.error(err);
     if(ocrStatus) ocrStatus.style.display="none";
@@ -567,7 +601,7 @@ async function processaImmagine(file){
   }
 }
 
-function preprocessImage(imgUrl){
+function preprocessImage(imgUrl, binarizza){
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -581,8 +615,10 @@ function preprocessImage(imgUrl){
       const data = imageData.data;
       for(let i=0; i<data.length; i+=4){
         const gray = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
-        const bw = gray > 150 ? 255 : 0;
-        data[i] = data[i+1] = data[i+2] = bw;
+        let v;
+        if(binarizza) v = gray > 150 ? 255 : 0;
+        else v = Math.max(0, Math.min(255, (gray - 128) * 1.5 + 128));
+        data[i] = data[i+1] = data[i+2] = v;
       }
       ctx.putImageData(imageData, 0, 0);
       resolve(canvas);
@@ -594,7 +630,7 @@ function preprocessImage(imgUrl){
 // ---- Schermata HOME: riquadro TIMBRATURE ----
 function estraiOrariTimbrature(testo){
   const pulito = testo.replace(/[oO](?=\d|\s|$)/g, "0").replace(/[lI](?=\d|\s|$)/g, "1");
-  const idxTimbrature = pulito.search(/TIMBRATUR/i);
+  const idxTimbrature = pulito.search(/TIMBRATURE/i);
   const idxGiustificativi = pulito.search(/GIUSTIFICATIV/i);
   let zonaUtile;
   if(idxTimbrature !== -1){
@@ -639,37 +675,57 @@ function estraiTimbratureAgenda(testo){
   }
   return items;
 }
-// Ingresso = prima Entrata; uscita finale = ultima Uscita; pranzo = coppia Uscita->Entrata piu' lunga.
-function selezioneConTipi(items){
-  if(items.length === 0) return ["","","",""];
-  const iIn = Math.max(0, items.findIndex(x => x.k === "E"));
+function estraiTurnoPrevisto(testo){
+  const m = testo.match(/Turno\s+previst\w*\s*:?\s*([^\n]+)/i);
+  if(!m) return [];
+  const out = [];
+  const re = /([01]?\d|2[0-3])[:.]([0-5]\d)/g;
+  let x;
+  while((x = re.exec(m[1])) !== null) out.push(x[1].padStart(2,"0") + ":" + x[2]);
+  return out;
+}
+// Mappa le timbrature sui 4 campi RISPETTANDO il tipo (E/U): se manca l'ingresso il campo resta vuoto
+// e le altre timbrature non scalano di posto.
+//  - Ingresso: prima riga solo se e' un'Entrata
+//  - Uscita finale: ultima Uscita
+//  - Pranzo: coppia Uscita->Entrata consecutiva con intervallo piu' lungo
+function mappaConTipi(items){
+  const res = { orari:["","","",""], ingressoMancante:false };
+  if(items.length === 0) return res;
+  const haIngresso = items[0].k === "E";
   let iOut = -1;
   for(let i=items.length-1; i>=0; i--){ if(items[i].k === "U"){ iOut = i; break; } }
-  if(iOut < 0 || iOut <= iIn) return [items[iIn].t,"","",""];
+  if(haIngresso) res.orari[0] = items[0].t; else res.ingressoMancante = true;
+  if(iOut >= 0 && iOut > (haIngresso ? 0 : -1)) res.orari[3] = items[iOut].t;
   let best = -1, bestGap = -1;
-  for(let i=iIn+1; i<iOut; i++){
-    if(items[i].k === "U" && items[i+1] && items[i+1].k === "E"){
+  for(let i=(haIngresso?1:0); i<iOut; i++){
+    if(items[i].k === "U" && items[i+1] && items[i+1].k === "E" && i+1 < iOut){
       const gap = timeToMinutes(items[i+1].t) - timeToMinutes(items[i].t);
       if(gap > bestGap){ bestGap = gap; best = i; }
     }
   }
-  if(best < 0) return [items[iIn].t,"","",items[iOut].t];
-  return [items[iIn].t, items[best].t, items[best+1].t, items[iOut].t];
+  if(best >= 0){ res.orari[1] = items[best].t; res.orari[2] = items[best+1].t; }
+  return res;
 }
 
 function leggiScreenshot(testo, schermata){
-  const haHeaderHome = /TIMBRATUR/i.test(testo);
+  const haHeaderHome = /TIMBRATURE/i.test(testo);
   const agenda = estraiTimbratureAgenda(testo);
   let usa = schermata, cambiata = false;
   if(schermata === "agenda" && agenda.length === 0 && haHeaderHome){ usa = "home"; cambiata = true; }
   else if(schermata === "home" && !haHeaderHome && agenda.length > 0){ usa = "agenda"; cambiata = true; }
   if(usa === "agenda"){
-    return { schermata:"agenda", cambiata, totale:agenda.length, orari:selezioneConTipi(agenda) };
+    const m = mappaConTipi(agenda);
+    const turno = estraiTurnoPrevisto(testo);
+    return { schermata:"agenda", cambiata, totale:agenda.length, orari:m.orari,
+             completo: m.orari.every(x => x), ingressoMancante: m.ingressoMancante,
+             suggerimentoIngresso: turno.length ? turno[0] : "" };
   }
   const tutti = haHeaderHome ? estraiOrariTimbrature(testo) : [];
   const sel = selezionaQuattroOrari(tutti);
   while(sel.length < 4) sel.push("");
-  return { schermata:"home", cambiata, totale:tutti.length, orari:sel };
+  return { schermata:"home", cambiata, totale:tutti.length, orari:sel,
+           completo: sel.every(x => x) && tutti.length % 2 === 0, ingressoMancante:false, suggerimentoIngresso:"" };
 }
 
 function estraiData(testo){
@@ -679,7 +735,7 @@ function estraiData(testo){
     agosto:8, ago:8, aug:8, settembre:9, set:9, sep:9, ottobre:10, ott:10, oct:10,
     novembre:11, nov:11, dicembre:12, dic:12, dec:12
   };
-  let m = testo.match(/(\d{1,2})\s+([A-Za-zàèìòù]{3,})\s+(\d{4})/i);
+  const m = testo.match(/(\d{1,2})\s+([A-Za-zàèìòù]{3,})\s+(\d{4})/i);
   if(m){
     const giorno = m[1].padStart(2,"0");
     const mese = mesiMap[m[2].toLowerCase()];
