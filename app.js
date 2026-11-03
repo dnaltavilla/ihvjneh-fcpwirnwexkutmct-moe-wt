@@ -1,7 +1,8 @@
-// STRAORDINARI - LOGICA APP
+// STRAORDINARI - LOGICA APP (versione 17)
 // OCR Home/Agenda, stima netto (semplice/avanzata/CCNL), retribuzione per voci, viste mese ordinario/tredicesima, simulazione, privacy, tutorial
 // NOTA PRIVACY: nessun valore economico reale e' scritto in questo file.
 
+const APP_VERSION = "17";
 const LS_KEY = "straordinari_giorni_v1";
 const LS_SETTINGS = "straordinari_settings_v1";
 const LS_ONBOARDED = "straordinari_onboarded_v1";
@@ -54,6 +55,22 @@ function on(id, evento, handler){
 }
 function openOv(id){ const e=$(id); if(e) e.classList.add("open"); }
 function closeOv(id){ const e=$(id); if(e) e.classList.remove("open"); }
+
+// Controllo: app.js e index.html devono essere della stessa versione
+function controllaVersione(){
+  const meta = document.querySelector('meta[name="app-version"]');
+  const attesi = ["btnPrivacy","vistaChips","tutorialOverlay","ccDetails","avDetails","simOverlay","btnTutorial","fFestivo","schermataChips","appVersion"];
+  const mancanti = attesi.filter(id => !$(id));
+  const v = $("appVersion"); if(v) v.textContent = "Versione app " + APP_VERSION;
+  if(!meta || meta.content !== APP_VERSION || mancanti.length){
+    const d = document.createElement("div");
+    d.id = "avvisoVersione";
+    d.textContent = "⚠️ File non allineati: app.js è la versione " + APP_VERSION + " ma index.html " + (meta ? "è la versione " + meta.content : "è vecchio") +
+      (mancanti.length ? " (mancano: " + mancanti.join(", ") + ")" : "") + ". Carica su GitHub anche index.html aggiornato, poi ricarica l'app. (tocca per chiudere)";
+    d.onclick = () => d.remove();
+    document.body.appendChild(d);
+  }
+}
 
 function loadState(){
   try{ const g = localStorage.getItem(LS_KEY); if(g) state.giorni = JSON.parse(g); }catch(e){}
@@ -308,7 +325,6 @@ function percentualeNettaStraordinario(ral, tipo, mensilita, o, strLordoMese){
 }
 
 // ==== RETRIBUZIONE PER VOCI ====
-// Se il patto di non concorrenza e' indicato al netto, ricava il lordo (bisezione sul netto annuo marginale).
 function pattoLordoDaNetto(ralSenzaPatto, nettoPatto, tipo, mensilita, o){
   if(nettoPatto <= 0) return 0;
   const base = calcolaNettoDettaglio(ralSenzaPatto, tipo, mensilita, o).nettoAnnuo;
@@ -319,7 +335,6 @@ function pattoLordoDaNetto(ralSenzaPatto, nettoPatto, tipo, mensilita, o){
   for(let i=0; i<60; i++){ const mid = (lo + hi) / 2; if(f(mid) < nettoPatto) lo = mid; else hi = mid; }
   return (lo + hi) / 2;
 }
-// Restituisce le voci e il totale (RAL) quando si inserisce la retribuzione per voci
 function ralDaVoci(s){
   const c = s.ccnl || CCNL_DEFAULT;
   const base = Math.max(0, num(c.base)), sup = Math.max(0, num(c.super)), alt = Math.max(0, num(c.altre));
@@ -331,14 +346,12 @@ function ralDaVoci(s){
   }
   return { base, sup, alt, pattoInserito: pat, pattoLordo, totale: base + sup + alt + pattoLordo };
 }
-// Quota fissa della RAL esclusa dalla base oraria: patto (sempre), superminimo (se escluso), altre voci (se non incluse)
 function quotaEsclusaStraordinario(ral, c){
   c = c || CCNL_DEFAULT;
   const patto = c.pattoLordo > 0 ? num(c.pattoLordo) : Math.max(0, num(c.patto));
   const esc = patto + (c.superEscl ? Math.max(0, num(c.super)) : 0) + (c.altreIncl === false ? Math.max(0, num(c.altre)) : 0);
   return Math.min(Math.max(0, ral), esc);
 }
-// Paga oraria: da CCNL ((RAL - quote escluse) / mensilita / divisore) oppure manuale
 function tariffe(ral, mens, s){
   const c = s.ccnl || CCNL_DEFAULT;
   const m1 = num(c.magg1)/100, m2 = num(c.magg2)/100;
@@ -444,7 +457,7 @@ function renderSummary(){
   grid.innerHTML = html;
 }
 document.querySelectorAll("#vistaChips .chip").forEach(c => {
-  c.onclick = () => { vistaMese = c.dataset.vista; localStorage.setItem(LS_VISTA, vistaMese); renderSummary(); };
+  c.addEventListener("click", () => { vistaMese = c.dataset.vista; localStorage.setItem(LS_VISTA, vistaMese); renderSummary(); });
 });
 
 function tipoLabel(t){ return ({permesso:"Permesso", ferie:"Ferie", malattia:"Malattia"})[t] || ""; }
@@ -865,7 +878,7 @@ function aggiornaChipSchermata(){
   document.querySelectorAll("#schermataChips .chip").forEach(c => c.classList.toggle("active", c.dataset.schermata === schermataOcr));
 }
 document.querySelectorAll("#schermataChips .chip").forEach(c => {
-  c.onclick = () => { schermataOcr = c.dataset.schermata; localStorage.setItem(LS_SCHERMATA, schermataOcr); aggiornaChipSchermata(); };
+  c.addEventListener("click", () => { schermataOcr = c.dataset.schermata; localStorage.setItem(LS_SCHERMATA, schermataOcr); aggiornaChipSchermata(); });
 });
 
 function punteggioLettura(r){
@@ -1092,6 +1105,7 @@ function estraiData(testo){
 
 // ==== INIT ====
 loadState();
+controllaVersione();
 aggiornaPrivacyUI();
 renderAll();
 checkOnboarding();
@@ -1099,7 +1113,12 @@ attivaTastieraNumericaOrari();
 aggiornaChipSchermata();
 
 if("serviceWorker" in navigator){
+  const avevaController = !!navigator.serviceWorker.controller;
+  let ricaricato = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if(avevaController && !ricaricato){ ricaricato = true; location.reload(); }   // nuova versione attivata: ricarica
+  });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(err => console.log("SW error", err));
+    navigator.serviceWorker.register("sw.js").then(reg => { try{ reg.update(); }catch(e){} }).catch(err => console.log("SW error", err));
   });
 }
